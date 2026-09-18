@@ -1,6 +1,6 @@
 {
   "name": "mivo-model-viewer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Multi-format browser 3D model viewer SDK — default UI or headless engine, easy to embed in any frontend page.",
   "type": "module",
   "license": "MIT",

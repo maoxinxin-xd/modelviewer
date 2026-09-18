@@ -6,7 +6,17 @@ import type {
 } from '../core'
 import type { Locale } from './i18n'
 
-export type ModelSource = File | Blob
+export type ModelSource = File | Blob | string
+
+export interface LoadModelOptions {
+  /**
+   * Source file name **with extension** (e.g. `"chair.obj"`, `"pack.zip"`).
+   * Required when the source is a Blob or a URL without an extension,
+   * unless MIME / magic bytes can identify the format.
+   * The SDK does **not** default to `.glb`.
+   */
+  fileName?: string
+}
 
 export interface ModelViewerUIOptions {
   /** Left model-info panel @default true */
@@ -43,8 +53,10 @@ export interface ModelViewerTheme {
 }
 
 export interface ModelViewerOptions {
-  /** Optional model to load on mount */
+  /** Optional model to load on mount (File | Blob | URL) */
   src?: ModelSource
+  /** File name for `src` when it is a Blob / URL without extension */
+  srcFileName?: string
   /**
    * Default UI configuration.
    * - `true` / omitted: show full default chrome
@@ -70,7 +82,7 @@ export interface ModelViewerInstance {
   /** Root DOM node created by the component */
   readonly root: HTMLElement
   readonly state: ViewerState
-  load(source: ModelSource): Promise<void>
+  load(source: ModelSource, options?: LoadModelOptions): Promise<void>
   subscribe(listener: (state: ViewerState) => void): () => void
   setProjection(mode: ProjectionMode): void
   setPresetView(view: PresetView): void

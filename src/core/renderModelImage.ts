@@ -1,5 +1,6 @@
 import { ViewerEngine } from './ViewerEngine'
 import { isSupportedModelFile } from './ModelLoader'
+import { resolveModelFileName } from './modelFormat'
 import type { PresetView, ProjectionMode, TextureMode } from './utils'
 
 export type ModelInput = File | Blob | string
@@ -8,6 +9,13 @@ export type ImageFormat = 'png' | 'jpeg' | 'webp'
 export interface RenderModelImageOptions {
   /** 必填：模型来源 File | Blob | URL。其余均可省略，使用默认值出图 */
   model: ModelInput
+
+  /**
+   * 源文件名（含扩展名）。
+   * Blob / 无扩展名 URL 时用于选择 Loader，例如 `"chair.obj"`、`"pack.zip"`。
+   * 不要依赖默认 `.glb`——未指定且无法推断时会报错。
+   */
+  fileName?: string
 
   /** 输出 CSS 像素宽 @default 1024 */
   width?: number
@@ -59,7 +67,7 @@ export interface RenderedImage {
   mime: string
   /** Set when this item came from `views[i]` */
   view?: PresetView
-  /** Source file name when known */
+  /** Resolved source file name used for loading */
   fileName?: string
 }
 
@@ -71,45 +79,73 @@ function defaultBackground(format: ImageFormat): 'transparent' | string {
   return format === 'jpeg' ? '#ffffff' : 'transparent'
 }
 
-function fileNameFromUrl(url: string): string {
-  try {
-    const path = new URL(url, 'https://local.invalid').pathname
-    return path.split('/').pop() || 'model'
-  } catch {
-    return url.split('/').pop()?.split('?')[0] || 'model'
-  }
+export interface ResolveModelInputOptions {
+  /** Original file name with extension (e.g. "model.obj") */
+  fileName?: string
+  signal?: AbortSignal
 }
 
-/** Resolve File | Blob | URL into a File the loader can accept. */
+/**
+ * Resolve File | Blob | URL into a File the loader can accept.
+ * Uses `fileName`, then File.name / URL path / MIME / magic bytes —
+ * never silently pretends the model is `.glb`.
+ */
 export async function resolveModelInput(
   source: ModelInput,
-  signal?: AbortSignal
+  options: ResolveModelInputOptions | AbortSignal = {}
 ): Promise<File> {
+  const opts: ResolveModelInputOptions =
+    typeof AbortSignal !== 'undefined' && options instanceof AbortSignal
+      ? { signal: options }
+      : (options as ResolveModelInputOptions)
+
+  const name = await resolveModelFileName(source, opts.fileName)
+
   if (source instanceof File) {
-    if (!isSupportedModelFile(source)) {
-      throw new Error(`Unsupported model format: ${source.name}`)
+    if (source.name === name) {
+      if (!isSupportedModelFile(source)) {
+        throw new Error(`Unsupported model format: ${source.name}`)
+      }
+      return source
     }
-    return source
+    // rename when caller provided a better fileName
+    const renamed = new File([source], name, {
+      type: source.type || undefined
+    })
+    if (!isSupportedModelFile(renamed)) {
+      throw new Error(`Unsupported model format: ${renamed.name}`)
+    }
+    return renamed
   }
 
   if (typeof Blob !== 'undefined' && source instanceof Blob) {
-    const name = 'model.glb'
-    return new File([source], name, {
-      type: source.type || 'model/gltf-binary'
-    })
+    const file = new File([source], name, { type: source.type || undefined })
+    if (!isSupportedModelFile(file)) {
+      throw new Error(`Unsupported model format: ${file.name}`)
+    }
+    return file
   }
 
   if (typeof source !== 'string') {
     throw new Error('model must be File | Blob | URL string')
   }
 
-  const res = await fetch(source, { signal })
+  const res = await fetch(source, { signal: opts.signal })
   if (!res.ok) {
     throw new Error(`Failed to fetch model (${res.status}): ${source}`)
   }
   const blob = await res.blob()
-  const name = fileNameFromUrl(source)
-  return new File([blob], name, { type: blob.type || 'application/octet-stream' })
+  const resolved = await resolveModelFileName(
+    blob,
+    opts.fileName || name
+  )
+  const file = new File([blob], resolved, {
+    type: blob.type || undefined
+  })
+  if (!isSupportedModelFile(file)) {
+    throw new Error(`Unsupported model format: ${file.name} (from ${source})`)
+  }
+  return file
 }
 
 function applyEngineOptions(engine: ViewerEngine, options: RenderModelImageOptions, format: ImageFormat) {
@@ -174,7 +210,8 @@ async function renderOne(
  * import { renderModelImage } from 'mivo-model-viewer/core'
  *
  * const blob = await renderModelImage({
- *   model: file,              // 或 URL 字符串
+ *   model: file,              // 或 Blob / URL 字符串
+ *   fileName: 'chair.obj',    // Blob/无扩展名 URL 时必填（或可被 MIME/文件头推断）
  *   width: 1200,
  *   height: 800,
  *   format: 'png',
@@ -218,7 +255,10 @@ export async function renderModelImages(
 
   options.signal?.throwIfAborted?.()
 
-  const file = await resolveModelInput(options.model, options.signal)
+  const file = await resolveModelInput(options.model, {
+    fileName: options.fileName,
+    signal: options.signal
+  })
   options.signal?.throwIfAborted?.()
 
   const host = document.createElement('div')

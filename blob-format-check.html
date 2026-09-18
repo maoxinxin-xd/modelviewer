@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>blob format check</title>
+  </head>
+  <body>
+    <pre id="log">running…</pre>
+    <script type="module">
+      import { resolveModelInput, renderModelImage } from './src/core/index.ts'
+
+      const log = (m) => {
+        document.getElementById('log').textContent += '\n' + m
+        console.log(m)
+      }
+      const results = []
+
+      const objText = [
+        'v 0 0 0',
+        'v 1 0 0',
+        'v 0 1 0',
+        'v 0 0 1',
+        'f 1 2 3',
+        'f 1 2 4',
+        'f 2 3 4',
+        'f 1 3 4'
+      ].join('\n')
+
+      function expect(label, fn) {
+        return fn()
+          .then((r) => {
+            results.push({ label, ok: true, r })
+            log(`OK ${label}: ${r}`)
+          })
+          .catch((e) => {
+            results.push({ label, ok: false, r: String(e) })
+            log(`ERR ${label}: ${e}`)
+          })
+      }
+
+      // 1) Blob + fileName → obj
+      await expect('blob+fileName', async () => {
+        const blob = new Blob([objText], { type: 'application/octet-stream' })
+        const file = await resolveModelInput(blob, { fileName: 'tetra.obj' })
+        return file.name
+      })
+
+      // 2) Blob + MIME obj
+      await expect('blob+mime', async () => {
+        const blob = new Blob([objText], { type: 'model/obj' })
+        const file = await resolveModelInput(blob)
+        return file.name
+      })
+
+      // 3) Blob magic GLB
+      await expect('blob+magic-glb', async () => {
+        const glbMagic = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0, 0, 0, 0, 0])
+        const blob = new Blob([glbMagic], { type: 'application/octet-stream' })
+        const file = await resolveModelInput(blob)
+        return file.name
+      })
+
+      // 4) Blob unknown → should FAIL (no model.glb default)
+      await expect('blob-no-hint-fails', async () => {
+        const blob = new Blob([new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])], {
+          type: 'application/octet-stream'
+        })
+        const file = await resolveModelInput(blob)
+        return `unexpected ${file.name}`
+      })
+
+      // 5) URL with ext
+      await expect('url-with-ext', async () => {
+        // relative URL path parsing
+        const name = await import('./src/core/modelFormat.ts').then((m) =>
+          m.resolveModelFileName('https://cdn.example.com/models/chair.obj?sig=1')
+        )
+        return name
+      })
+
+      // 6) renderModelImage Blob + fileName (obj)
+      await expect('render-blob-obj', async () => {
+        const blob = new Blob([objText], { type: 'application/octet-stream' })
+        const img = await renderModelImage({
+          model: blob,
+          fileName: 'tetra.obj',
+          width: 128,
+          height: 128,
+          background: '#222',
+          format: 'png'
+        })
+        return `${img.type} ${img.size}`
+      })
+
+      const failed = results.filter((r) => r.label !== 'blob-no-hint-fails' && !r.ok)
+      const noHint = results.find((r) => r.label === 'blob-no-hint-fails')
+      window.__blobFormatResult = {
+        results,
+        ok: failed.length === 0 && noHint?.ok === false
+      }
+      document.title = window.__blobFormatResult.ok ? 'BLOB_FORMAT_OK' : 'BLOB_FORMAT_FAIL'
+      log('DONE ' + document.title)
+    </script>
+  </body>
+</html>

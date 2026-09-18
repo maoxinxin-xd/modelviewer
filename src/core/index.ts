@@ -35,5 +35,12 @@ export type {
   ModelInput,
   ImageFormat,
   RenderModelImageOptions,
-  RenderedImage
+  RenderedImage,
+  ResolveModelInputOptions
 } from './renderModelImage'
+export {
+  resolveModelFileName,
+  sniffBlobExtension,
+  extensionOf,
+  hasModelExtension
+} from './modelFormat'

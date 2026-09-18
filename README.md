@@ -160,18 +160,28 @@ import { renderModelImage, renderModelImages } from 'mivo-model-viewer/core'
 
 // 只传 model 即可出图（其余全默认）
 // 默认：1024×1024 PNG、透明底、透视、front、无网格、贴图模式自动
-const blob = await renderModelImage({ model: file }) // 或 URL 字符串
+const blob = await renderModelImage({ model: file }) // File 带扩展名时
+
+// Blob / 无扩展名 URL：用 fileName 选 Loader（不会默认当成 .glb）
+const fromBlob = await renderModelImage({
+  model: blob,
+  fileName: 'chair.obj' // 或 pack.zip / part.step …
+})
+
+// URL 已带扩展名时可省略 fileName
+const fromUrl = await renderModelImage({ model: 'https://cdn/x.glb' })
 
 // 按需覆盖
 const styled = await renderModelImage({
   model: file,
+  fileName: 'model.obj',      // 可选
   width: 1280,
   height: 800,
   format: 'png',               // png | jpeg | webp
   background: 'transparent',   // jpeg 默认白底
-  presetView: 'front',         // front | back | side | top
+  presetView: 'front',
   lightIntensity: 3,
-  square: false                // true 时按长边裁成 1:1
+  square: false
 })
 
 // 多机位一次出图
@@ -187,6 +197,7 @@ const shots = await renderModelImages({
 | 选项 | 说明 |
 |------|------|
 | `model` | `File` \| `Blob` \| URL 字符串 |
+| `fileName` | 源文件名（**含扩展名**）。Blob / 无扩展名 URL 用于选 Loader；无法从 MIME/文件头推断时必填。**不会**默认 `model.glb` |
 | `width` / `height` | 输出像素，默认 1024×1024 |
 | `format` / `quality` | `png` \| `jpeg` \| `webp`；有损格式用 quality 0–1 |
 | `background` | `'transparent'` 或 CSS 颜色；jpeg 默认 `#ffffff` |
@@ -224,7 +235,8 @@ createModelViewer(
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `src` | `File \| Blob` | 挂载后自动加载 |
+| `src` | `File \| Blob \| string` | 挂载后自动加载 |
+| `srcFileName` | `string` | `src` 为 Blob/无扩展名 URL 时的文件名 |
 | `ui` | `boolean \| ModelViewerUIOptions` | `true` 全开 / 对象按面板开关 / `false` 无头 |
 | `theme` | `{ primary, text, panelBg, background }` | CSS 变量级换肤 |
 | `locale` | `'zh-CN' \| 'en-US'` | 默认 UI 文案 |
@@ -236,7 +248,7 @@ createModelViewer(
 
 | 成员 | 说明 |
 |------|------|
-| `load(File \| Blob)` | 加载模型 |
+| `load(source, { fileName? })` | 加载 File / Blob / URL；Blob 建议传 `fileName` |
 | `subscribe(fn)` | 订阅状态，返回取消函数 |
 | `setProjection('perspective' \| 'orthographic')` | 投影切换 |
 | `setPresetView('front' \| 'back' \| 'side' \| 'top')` | 预设机位（球面插值动画） |
@@ -265,7 +277,7 @@ createModelViewer(
 `isSupportedModelFile` · `SUPPORTED_ACCEPT` · `CAMERA_CONFIG` · `countTriangles` · `getModelDiagonal` · `hasValidModelDimensions` · `disposeObject3D` · `calculateOrthographicViewSize` · `sphericalToCartesian` · `extractAlbedoFromMaterial`
 
 **离屏出图（core）**  
-`renderModelImage` · `renderModelImages` · `renderModelImageDetailed` · `renderModelImageObjectURL` · `renderModelImageDataUrl` · `resolveModelInput`
+`renderModelImage` · `renderModelImages` · `renderModelImageDetailed` · `renderModelImageObjectURL` · `renderModelImageDataUrl` · `resolveModelInput` · `resolveModelFileName` · `sniffBlobExtension`
 
 **稳定枚举**
 

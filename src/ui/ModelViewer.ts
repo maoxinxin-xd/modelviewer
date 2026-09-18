@@ -1,6 +1,7 @@
 import { ViewerEngine } from '../core/ViewerEngine'
 import {
   isSupportedModelFile,
+  resolveModelInput,
   SUPPORTED_ACCEPT,
   type PresetView,
   type ProjectionMode,
@@ -10,6 +11,7 @@ import {
 import { icons } from './icons'
 import { resolveCopy, type Locale, type ViewerCopy } from './i18n'
 import type {
+  LoadModelOptions,
   ModelSource,
   ModelViewerInstance,
   ModelViewerOptions,
@@ -341,7 +343,7 @@ class ModelViewer implements ModelViewerInstance {
     this.bindUi()
 
     if (options.src) {
-      void this.load(options.src).catch((error) => {
+      void this.load(options.src, { fileName: options.srcFileName }).catch((error) => {
         const err = error instanceof Error ? error : new Error(String(error))
         options.onLoadError?.(err)
       })
@@ -723,20 +725,22 @@ class ModelViewer implements ModelViewerInstance {
     if (this.refs.ambientSlider) updateSliderFill(this.refs.ambientSlider)
   }
 
-  async load(source: ModelSource) {
+  async load(source: ModelSource, options: { fileName?: string } = {}) {
     if (this.disposed) throw new Error('[model-viewer] instance disposed')
-    if (source instanceof File) {
-      if (!isSupportedModelFile(source)) {
-        this.options.onFileRejected?.(source)
-        this.toast(this.copy.toastUnsupported, 'error')
-        throw new Error(this.copy.toastUnsupported)
-      }
-      await this.engine.loadFromFile(source)
-      return
+    const file = await resolveModelInput(source, { fileName: options.fileName })
+    if (!isSupportedModelFile(file)) {
+      this.options.onFileRejected?.(file)
+      this.toast(this.copy.toastUnsupported, 'error')
+      throw new Error(this.copy.toastUnsupported)
     }
-    // Blob without name: wrap as File with generic extension hint
-    const file = new File([source], 'model.glb', { type: source.type || 'model/gltf-binary' })
-    await this.engine.loadFromFile(file)
+    try {
+      await this.engine.loadFromFile(file)
+    } catch (error) {
+      this.options.onLoadError?.(
+        error instanceof Error ? error : new Error(String(error))
+      )
+      throw error
+    }
   }
 
   subscribe(listener: (state: ViewerState) => void) {
@@ -815,5 +819,6 @@ export type {
   ModelViewerUIOptions,
   ModelViewerTheme,
   ModelViewerInstance,
-  ModelSource
+  ModelSource,
+  LoadModelOptions
 }

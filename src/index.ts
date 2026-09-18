@@ -11,7 +11,8 @@ export type {
   ModelViewerUIOptions,
   ModelViewerTheme,
   ModelViewerInstance,
-  ModelSource
+  ModelSource,
+  LoadModelOptions
 } from './ui/types'
 export { locales, resolveCopy } from './ui/i18n'
 export type { Locale, ViewerCopy } from './ui/i18n'
@@ -40,7 +41,9 @@ export {
   renderModelImages,
   renderModelImageObjectURL,
   renderModelImageDataUrl,
-  resolveModelInput
+  resolveModelInput,
+  resolveModelFileName,
+  sniffBlobExtension
 } from './core'
 export type {
   ViewerState,
