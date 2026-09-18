@@ -86,7 +86,7 @@ function updateSliderFill(slider: HTMLInputElement) {
   const max = Number(slider.max)
   const value = Number(slider.value)
   const pct = max > min ? ((value - min) / (max - min)) * 100 : 0
-  slider.style.setProperty('--mv-fill', `${pct}%`)
+  slider.style.setProperty('--fill', `${pct}%`)
 }
 
 function buildTemplate(copy: ViewerCopy, ui: Required<ModelViewerUIOptions>) {
@@ -155,11 +155,11 @@ function buildTemplate(copy: ViewerCopy, ui: Required<ModelViewerUIOptions>) {
                   <div class="mv-field-label">${copy.projection}</div>
                   <div class="mv-segment-row">
                     <button type="button" class="mv-segment-btn is-active" data-mv="btnPerspective">
-                      <span class="mv-segment-icon">${icons.perspective}</span>
+                      <span class="mv-segment-icon"><img src="${icons.perspective}" alt="" /></span>
                       <span>${copy.perspective}</span>
                     </button>
                     <button type="button" class="mv-segment-btn" data-mv="btnOrthographic">
-                      <span class="mv-segment-icon">${icons.orthographic}</span>
+                      <span class="mv-segment-icon"><img src="${icons.orthographic}" alt="" /></span>
                       <span>${copy.orthographic}</span>
                     </button>
                   </div>
@@ -167,10 +167,10 @@ function buildTemplate(copy: ViewerCopy, ui: Required<ModelViewerUIOptions>) {
                 <div class="mv-field">
                   <div class="mv-field-label">${copy.presetViews}</div>
                   <div class="mv-preset-grid">
-                    <button type="button" class="mv-preset-btn is-active" data-view="front" data-mv="btnFront" title="${copy.front}">${icons.front}</button>
-                    <button type="button" class="mv-preset-btn" data-view="back" data-mv="btnBack" title="${copy.back}">${icons.back}</button>
-                    <button type="button" class="mv-preset-btn" data-view="side" data-mv="btnSide" title="${copy.side}">${icons.side}</button>
-                    <button type="button" class="mv-preset-btn" data-view="top" data-mv="btnTop" title="${copy.top}">${icons.top}</button>
+                    <button type="button" class="mv-preset-btn is-active" data-view="front" data-mv="btnFront" title="${copy.front}"><img src="${icons.front}" alt="${copy.front}" /></button>
+                    <button type="button" class="mv-preset-btn" data-view="back" data-mv="btnBack" title="${copy.back}"><img src="${icons.back}" alt="${copy.back}" /></button>
+                    <button type="button" class="mv-preset-btn" data-view="side" data-mv="btnSide" title="${copy.side}"><img src="${icons.side}" alt="${copy.side}" /></button>
+                    <button type="button" class="mv-preset-btn" data-view="top" data-mv="btnTop" title="${copy.top}"><img src="${icons.top}" alt="${copy.top}" /></button>
                   </div>
                 </div>
               </section>
@@ -216,16 +216,16 @@ function buildTemplate(copy: ViewerCopy, ui: Required<ModelViewerUIOptions>) {
                 ui.textureModes
                   ? `<div class="mv-texture-group hidden" data-mv="textureGroup">
                       <div class="mv-tooltip" data-tip="${copy.texture}">
-                        <button type="button" class="mv-texture-btn is-active" data-mode="textured" data-mv="btnTextured">${icons.textured}</button>
+                        <button type="button" class="mv-texture-btn is-active" data-mode="textured" data-mv="btnTextured"><img class="mv-texture-icon" src="${icons.textured}" alt="${copy.texture}" /></button>
                       </div>
                       <div class="mv-tooltip" data-tip="${copy.clay}">
-                        <button type="button" class="mv-texture-btn" data-mode="clay" data-mv="btnClay">${icons.clay}</button>
+                        <button type="button" class="mv-texture-btn" data-mode="clay" data-mv="btnClay"><img class="mv-texture-icon" src="${icons.clay}" alt="${copy.clay}" /></button>
                       </div>
                       <div class="mv-tooltip" data-tip="${copy.normal}">
-                        <button type="button" class="mv-texture-btn" data-mode="normal" data-mv="btnNormal">${icons.normal}</button>
+                        <button type="button" class="mv-texture-btn" data-mode="normal" data-mv="btnNormal"><img class="mv-texture-icon" src="${icons.normal}" alt="${copy.normal}" /></button>
                       </div>
                       <div class="mv-tooltip" data-tip="${copy.albedo}">
-                        <button type="button" class="mv-texture-btn" data-mode="albedo" data-mv="btnAlbedo">${icons.albedo}</button>
+                        <button type="button" class="mv-texture-btn" data-mode="albedo" data-mv="btnAlbedo"><img class="mv-texture-icon" src="${icons.albedo}" alt="${copy.albedo}" /></button>
                       </div>
                     </div>`
                   : ''
@@ -235,7 +235,7 @@ function buildTemplate(copy: ViewerCopy, ui: Required<ModelViewerUIOptions>) {
                 ui.screenshot
                   ? `<div class="mv-tooltip hidden" data-mv="screenshotWrap" data-tip="${copy.screenshot}">
                       <button type="button" class="mv-action-btn" data-mv="btnScreenshot">
-                        ${icons.screenshot}
+                        <img src="${icons.screenshot}" alt="" width="18" height="18" />
                         ${copy.screenshot}
                       </button>
                     </div>`

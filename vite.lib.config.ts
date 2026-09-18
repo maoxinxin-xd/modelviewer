@@ -14,6 +14,8 @@ export default defineConfig({
     target: 'es2020',
     sourcemap: true,
     minify: 'esbuild',
+    // Inline original UI icons / dial art so npm package is self-contained
+    assetsInlineLimit: 8 * 1024 * 1024,
     lib: {
       entry: {
         'mivo-model-viewer': resolve(__dirname, 'src/index.ts'),
