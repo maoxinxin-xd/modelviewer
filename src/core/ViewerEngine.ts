@@ -30,6 +30,8 @@ export interface ViewerState {
   ambientIntensity: number
   fileName: string
   isDragging: boolean
+  materialStatus: string
+  entryName: string
 }
 
 type StateListener = (state: ViewerState) => void
@@ -70,7 +72,9 @@ export class ViewerEngine {
     lightIntensity: 2,
     ambientIntensity: 2,
     fileName: '',
-    isDragging: false
+    isDragging: false,
+    materialStatus: '-',
+    entryName: ''
   }
 
   constructor(container: HTMLElement) {
@@ -268,6 +272,16 @@ export class ViewerEngine {
 
     const triangleCount = countTriangles(this.modelRoot)
     const hasTextures = this.detectHasTextures(this.modelRoot)
+    const report = result.materialReport
+    const materialStatus =
+      report.texturesMissing > 0
+        ? `部分缺失（找到 ${report.texturesFound}）`
+        : report.texturesFound > 0
+          ? `完整（${report.texturesFound}）`
+          : hasTextures
+            ? 'Loader 内置'
+            : '默认材质'
+
     this.patch({
       progress: 100,
       ready: true,
@@ -275,6 +289,8 @@ export class ViewerEngine {
       hasModel: true,
       triangleCount,
       fileName: result.fileName,
+      entryName: result.entryName,
+      materialStatus,
       isWhiteModel: !hasTextures,
       textureMode: hasTextures ? '贴图' : '白膜',
       presetView: 'front',

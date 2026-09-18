@@ -6,8 +6,15 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js'
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js'
+import { TDSLoader } from 'three/examples/jsm/loaders/TDSLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
+import { createAssetPackFromZip, type AssetPack } from './AssetPack'
+import {
+  applyMaterialFallback,
+  tryLoadMtlFromPack,
+  type MaterialReport
+} from './MaterialResolver'
 
 export type ProgressCallback = (percent: number) => void
 
@@ -16,6 +23,9 @@ export interface LoadResult {
   animations: THREE.AnimationClip[]
   fileName: string
   fileBlob: Blob | null
+  materialReport: MaterialReport
+  /** 实际加载的入口（ZIP 时为包内文件） */
+  entryName: string
 }
 
 const MODEL_EXTENSIONS = [
@@ -26,8 +36,13 @@ const MODEL_EXTENSIONS = [
   'stl',
   'ply',
   'dae',
-  '3mf'
+  '3mf',
+  '3ds',
+  'zip'
 ]
+
+export const SUPPORTED_ACCEPT =
+  '.glb,.gltf,.obj,.fbx,.stl,.ply,.dae,.3mf,.3ds,.zip'
 
 export function isSupportedModelFile(file: File): boolean {
   const ext = file.name.split('.').pop()?.toLowerCase() || ''
@@ -42,7 +57,6 @@ function ensureGroup(object: THREE.Object3D): THREE.Group {
 }
 
 function normalizeObject(root: THREE.Object3D) {
-  // Center model at origin and keep original scale
   const box = new THREE.Box3().setFromObject(root)
   if (box.isEmpty()) return
   const center = new THREE.Vector3()
@@ -61,38 +75,130 @@ function normalizeObject(root: THREE.Object3D) {
   })
 }
 
+function emptyReport(note = ''): MaterialReport {
+  return {
+    texturesFound: 0,
+    texturesMissing: 0,
+    missingSlots: [],
+    notes: note ? [note] : []
+  }
+}
+
+function defaultPbrMaterial(color = 0xb0b0b0): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.7,
+    metalness: 0.05,
+    side: THREE.DoubleSide
+  })
+}
+
 export class ModelLoader {
   private draco: DRACOLoader | null = null
   private manager = new THREE.LoadingManager()
+  private activePack: AssetPack | null = null
 
   constructor() {
     this.draco = new DRACOLoader()
-    this.draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/')
+    this.draco.setDecoderPath(
+      'https://www.gstatic.com/draco/versioned/decoders/1.5.7/'
+    )
+  }
+
+  private releasePack() {
+    if (this.activePack) {
+      this.activePack.dispose()
+      this.activePack = null
+    }
   }
 
   async loadFromFile(file: File, onProgress?: ProgressCallback): Promise<LoadResult> {
     const ext = file.name.split('.').pop()?.toLowerCase() || ''
+    this.releasePack()
+
+    if (ext === 'zip') {
+      return this.loadFromZip(file, onProgress)
+    }
+
     const url = URL.createObjectURL(file)
     try {
-      const result = await this.loadFromUrl(url, ext, onProgress)
-      result.fileName = file.name
+      const result = await this.loadFromUrl(url, ext, onProgress, file.name)
       result.fileBlob = file
+      result.fileName = file.name
       return result
     } finally {
       URL.revokeObjectURL(url)
     }
   }
 
-  async loadFromUrl(
-    url: string,
-    ext: string,
-    onProgress?: ProgressCallback
-  ): Promise<LoadResult> {
-    const manager = this.manager
-    manager.onProgress = (_url, loaded, total) => {
-      if (total > 0) onProgress?.((loaded / total) * 100)
+  private async loadFromZip(file: File, onProgress?: ProgressCallback): Promise<LoadResult> {
+    onProgress?.(5)
+    const pack = await createAssetPackFromZip(file)
+    this.activePack = pack
+
+    const entry = pack.files.get(pack.entryPath)
+    if (!entry) {
+      pack.dispose()
+      throw new Error('ZIP 入口模型读取失败')
+    }
+    if (!entry.blobUrl) {
+      entry.blobUrl = URL.createObjectURL(
+        new Blob([entry.data as unknown as BlobPart], { type: entry.mimeType })
+      )
+      // AssetPack.dispose() owns all generated blob URLs, including the entry model.
+      pack.blobUrls.push(entry.blobUrl)
     }
 
+    onProgress?.(15)
+    const manager = pack.manager
+    manager.onProgress = (_url, loaded, total) => {
+      if (total > 0) onProgress?.(20 + (loaded / total) * 70)
+    }
+
+    try {
+      const object = await this.loadSceneFromUrl(
+        entry.blobUrl,
+        pack.entryExt,
+        manager,
+        pack.entryPath
+      )
+
+      // OBJ：尝试包内 MTL
+      if (pack.entryExt === 'obj') {
+        tryLoadMtlFromPack(pack, object)
+      }
+
+      // FBX/OBJ/3DS/DAE：材质启发式补全
+      let materialReport = emptyReport('独立文件，无外挂资源包')
+      if (['fbx', 'obj', '3ds', 'dae'].includes(pack.entryExt)) {
+        materialReport = applyMaterialFallback(object, pack)
+      } else if (pack.entryExt === 'gltf' || pack.entryExt === 'glb') {
+        materialReport = emptyReport('GLTF/GLB 自带材质')
+      }
+
+      normalizeObject(object)
+      onProgress?.(100)
+      return {
+        object,
+        animations: (object.animations as THREE.AnimationClip[]) || [],
+        fileName: file.name,
+        fileBlob: file,
+        materialReport,
+        entryName: pack.entryPath
+      }
+    } catch (error) {
+      pack.dispose()
+      this.activePack = null
+      throw error
+    }
+  }
+
+  private async loadSceneFromUrl(
+    url: string,
+    ext: string,
+    manager: THREE.LoadingManager,
+    name: string
+  ): Promise<THREE.Group> {
     switch (ext) {
       case 'glb':
       case 'gltf': {
@@ -100,93 +206,101 @@ export class ModelLoader {
         if (this.draco) loader.setDRACOLoader(this.draco)
         loader.setMeshoptDecoder(MeshoptDecoder)
         const gltf = await loader.loadAsync(url)
-        const object = ensureGroup(gltf.scene)
-        normalizeObject(object)
-        return {
-          object,
-          animations: gltf.animations || [],
-          fileName: url.split('/').pop() || 'model.glb',
-          fileBlob: null
-        }
+        return ensureGroup(gltf.scene)
       }
       case 'obj': {
         const loader = new OBJLoader(manager)
-        const object = ensureGroup(await loader.loadAsync(url))
-        object.traverse((child) => {
-          const mesh = child as THREE.Mesh
-          if (mesh.isMesh) {
-            mesh.material = new THREE.MeshStandardMaterial({
-              color: 0xcccccc,
-              roughness: 0.7,
-              metalness: 0.1,
-              side: THREE.DoubleSide
-            })
-          }
-        })
-        normalizeObject(object)
-        return { object, animations: [], fileName: url.split('/').pop() || 'model.obj', fileBlob: null }
+        return ensureGroup(await loader.loadAsync(url))
       }
       case 'fbx': {
         const loader = new FBXLoader(manager)
-        const object = ensureGroup(await loader.loadAsync(url))
-        normalizeObject(object)
-        return { object, animations: (object.animations as THREE.AnimationClip[]) || [], fileName: url.split('/').pop() || 'model.fbx', fileBlob: null }
+        return ensureGroup(await loader.loadAsync(url))
       }
-      case 'stl': {
-        const loader = new STLLoader(manager)
-        const geometry = await loader.loadAsync(url)
-        geometry.computeVertexNormals()
-        const material = new THREE.MeshStandardMaterial({
-          color: 0xb0b0b0,
-          roughness: 0.65,
-          metalness: 0.05,
-          side: THREE.DoubleSide
-        })
-        const mesh = new THREE.Mesh(geometry, material)
-        const object = ensureGroup(mesh)
-        normalizeObject(object)
-        return { object, animations: [], fileName: url.split('/').pop() || 'model.stl', fileBlob: null }
+      case '3ds': {
+        const loader = new TDSLoader(manager)
+        const group = await loader.loadAsync(url)
+        return ensureGroup(group)
+      }
+      case 'dae': {
+        const loader = new ColladaLoader(manager)
+        const collada = await loader.loadAsync(url)
+        return ensureGroup(collada.scene)
+      }
+      case '3mf': {
+        const loader = new ThreeMFLoader(manager)
+        return ensureGroup(await loader.loadAsync(url))
       }
       case 'ply': {
         const loader = new PLYLoader(manager)
         const geometry = await loader.loadAsync(url)
         geometry.computeVertexNormals()
-        const material = new THREE.MeshStandardMaterial({
-          color: 0xb0b0b0,
-          roughness: 0.65,
-          metalness: 0.05,
-          side: THREE.DoubleSide,
-          flatShading: !geometry.attributes.normal
-        })
-        const mesh = new THREE.Mesh(geometry, material)
-        const object = ensureGroup(mesh)
-        normalizeObject(object)
-        return { object, animations: [], fileName: url.split('/').pop() || 'model.ply', fileBlob: null }
+        const mesh = new THREE.Mesh(geometry, defaultPbrMaterial())
+        return ensureGroup(mesh)
       }
-      case 'dae': {
-        const loader = new ColladaLoader(manager)
-        const collada = await loader.loadAsync(url)
-        const object = ensureGroup(collada.scene)
-        normalizeObject(object)
-        return {
-          object,
-          animations: (collada as unknown as { animations?: THREE.AnimationClip[] }).animations || [],
-          fileName: url.split('/').pop() || 'model.dae',
-          fileBlob: null
-        }
-      }
-      case '3mf': {
-        const loader = new ThreeMFLoader(manager)
-        const object = ensureGroup(await loader.loadAsync(url))
-        normalizeObject(object)
-        return { object, animations: [], fileName: url.split('/').pop() || 'model.3mf', fileBlob: null }
+      case 'stl': {
+        const loader = new STLLoader(manager)
+        const geometry = await loader.loadAsync(url)
+        geometry.computeVertexNormals()
+        const mesh = new THREE.Mesh(geometry, defaultPbrMaterial())
+        return ensureGroup(mesh)
       }
       default:
-        throw new Error(`不支持的模型格式: .${ext}`)
+        throw new Error(`不支持的模型格式: .${ext} (${name})`)
+    }
+  }
+
+  async loadFromUrl(
+    url: string,
+    ext: string,
+    onProgress?: ProgressCallback,
+    displayName?: string
+  ): Promise<LoadResult> {
+    const manager = this.manager
+    manager.onProgress = (_url, loaded, total) => {
+      if (total > 0) onProgress?.((loaded / total) * 100)
+    }
+
+    const object = await this.loadSceneFromUrl(
+      url,
+      ext,
+      manager,
+      displayName || url
+    )
+
+    let materialReport = emptyReport()
+    if (ext === 'obj') {
+      object.traverse((child) => {
+        const mesh = child as THREE.Mesh
+        if (mesh.isMesh && !mesh.material) {
+          mesh.material = defaultPbrMaterial(0xcccccc)
+        } else if (mesh.isMesh) {
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+          mats.forEach((m) => {
+            const anyM = m as unknown as Record<string, unknown>
+            if (m && !anyM.map) {
+              anyM.roughness = 0.7
+              anyM.metalness = 0.05
+              m.needsUpdate = true
+            }
+          })
+        }
+      })
+      materialReport = emptyReport('OBJ 未提供外挂 MTL/贴图时使用默认材质')
+    }
+
+    normalizeObject(object)
+    return {
+      object,
+      animations: (object.animations as THREE.AnimationClip[]) || [],
+      fileName: displayName || url.split('/').pop() || `model.${ext}`,
+      fileBlob: null,
+      materialReport,
+      entryName: displayName || url
     }
   }
 
   dispose() {
+    this.releasePack()
     this.draco?.dispose()
   }
 }

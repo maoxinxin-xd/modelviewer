@@ -1,6 +1,6 @@
 import './styles.css'
 import { ViewerEngine } from './core/ViewerEngine'
-import { isSupportedModelFile } from './core/ModelLoader'
+import { isSupportedModelFile, SUPPORTED_ACCEPT } from './core/ModelLoader'
 import type { PresetView, TextureMode } from './core/utils'
 
 import perspectiveIcon from './icons/perspective.svg'
@@ -68,7 +68,7 @@ app.innerHTML = `
 
     <div class="empty-hint" id="emptyHint">
       <div class="empty-hint-title">3D 模型查看器</div>
-      <div class="empty-hint-desc">点击底部「导入」选择本地模型文件开始预览</div>
+      <div class="empty-hint-desc">支持 GLB/GLTF/OBJ/FBX/STL/PLY/DAE/3MF/3DS，以及含模型+贴图的 ZIP</div>
     </div>
 
     <!-- 左侧：模型信息 -->
@@ -88,6 +88,10 @@ app.innerHTML = `
             <div class="info-row">
               <span class="info-label">面数</span>
               <span class="info-value" id="faceCountValue">0</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">材质</span>
+              <span class="info-value" id="materialStatusValue">-</span>
             </div>
           </div>
         </section>
@@ -207,7 +211,7 @@ app.innerHTML = `
       class="hidden-input"
       id="fileInput"
       type="file"
-      accept=".glb,.gltf,.obj,.fbx,.stl,.ply,.dae,.3mf"
+      accept="${SUPPORTED_ACCEPT}"
     />
   </div>
 `
@@ -226,6 +230,7 @@ const screenshotWrap = $('screenshotWrap')
 const fileNameValue = $('fileNameValue')
 const faceCountValue = $('faceCountValue')
 const topologyValue = $('topologyValue')
+const materialStatusValue = $('materialStatusValue')
 
 const btnPerspective = $('btnPerspective')
 const btnOrthographic = $('btnOrthographic')
@@ -286,6 +291,7 @@ engine.subscribe((state) => {
   if (state.fileName) fileNameValue.textContent = state.fileName
   faceCountValue.textContent = String(state.triangleCount)
   topologyValue.textContent = '三角面'
+  materialStatusValue.textContent = state.materialStatus || '-'
 
   // projection
   btnPerspective.classList.toggle('is-active', state.projectionMode === 'perspective')
@@ -439,15 +445,25 @@ fileInput.addEventListener('change', async () => {
   fileInput.value = ''
   if (!file) return
   if (!isSupportedModelFile(file)) {
-    toast('不支持的模型格式，请选择 GLB/GLTF/OBJ/FBX/STL/PLY/DAE/3MF', 'error')
+    toast('不支持的格式。支持：GLB/GLTF/OBJ/FBX/STL/PLY/DAE/3MF/3DS/ZIP', 'error')
     return
   }
   try {
     await engine.loadFromFile(file)
-    toast(`模型加载成功：${file.name}`, 'success')
+    const entry = engine.state.entryName
+    const base = engine.state.fileName
+    const msg =
+      entry && entry !== base
+        ? `已加载 ${base} → ${entry}`
+        : `模型加载成功：${base}`
+    toast(msg, 'success')
+    if (engine.state.materialStatus.includes('缺失') || engine.state.materialStatus === '默认材质') {
+      toast(`材质：${engine.state.materialStatus}`, 'warn')
+    }
   } catch (error) {
     console.error(error)
-    toast('模型加载失败，请重试', 'error')
+    const reason = error instanceof Error ? error.message : '模型加载失败，请重试'
+    toast(reason, 'error')
   }
 })
 
