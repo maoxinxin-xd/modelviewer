@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": true,
+    "declarationDir": "./dist",
+    "allowImportingTsExtensions": false,
+    "moduleResolution": "bundler",
+    "skipLibCheck": true
+  },
+  "include": ["src/index.ts", "src/core/index.ts", "src/ui/**/*.ts", "src/core/**/*.ts", "src/vite-env.d.ts"],
+  "exclude": ["src/main.ts", "node_modules", "dist", "dist-demo"]
+}

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>render perf</title>
+  </head>
+  <body>
+    <pre id="status">running…</pre>
+    <img id="result" alt="" style="max-width:480px;border:1px solid #ccc" />
+    <script type="module">
+      import { renderModelImage, renderModelImages } from './src/core/renderModelImage.ts'
+
+      const status = document.getElementById('status')
+      const img = document.getElementById('result')
+      const MODEL_URL = '/actionvideo_unreal.glb'
+      const OUT = {
+        modelBytes: 0,
+        modelMB: 0,
+        fetchMs: 0,
+        defaultsMs: 0,
+        defaultsImageBytes: 0,
+        styledMs: 0,
+        styledImageBytes: 0,
+        multiMs: 0,
+        multi: [],
+        width: 0,
+        height: 0,
+        error: null,
+        note: 'defaults = only { model } passed'
+      }
+
+      const now = () => performance.now()
+
+      try {
+        const tFetch = now()
+        const res = await fetch(MODEL_URL)
+        if (!res.ok) throw new Error(`fetch ${res.status}`)
+        const blob = await res.blob()
+        OUT.fetchMs = Math.round(now() - tFetch)
+        OUT.modelBytes = blob.size
+        OUT.modelMB = +(blob.size / 1024 / 1024).toFixed(2)
+        const file = new File([blob], 'actionvideo_unreal.glb', {
+          type: 'model/gltf-binary'
+        })
+
+        // 1) 仅传 model —— 全默认出图
+        const t1 = now()
+        const defaultBlob = await renderModelImage({ model: file })
+        OUT.defaultsMs = Math.round(now() - t1)
+        OUT.defaultsImageBytes = defaultBlob.size
+        OUT.width = 1024
+        OUT.height = 1024
+
+        // 2) 带展示参数的出图（保存到下载目录）
+        const t2 = now()
+        const styledBlob = await renderModelImage({
+          model: file,
+          width: 1280,
+          height: 960,
+          format: 'png',
+          background: '#1c1f1f',
+          presetView: 'front',
+          lightIntensity: 2.5,
+          showGrid: false
+        })
+        OUT.styledMs = Math.round(now() - t2)
+        OUT.styledImageBytes = styledBlob.size
+        OUT.width = 1280
+        OUT.height = 960
+
+        // 3) 多机位 JPEG
+        const t3 = now()
+        const multi = await renderModelImages({
+          model: file,
+          width: 800,
+          height: 800,
+          format: 'jpeg',
+          quality: 0.9,
+          background: '#ffffff',
+          views: ['front', 'back', 'side', 'top']
+        })
+        OUT.multiMs = Math.round(now() - t3)
+        OUT.multi = multi.map((m) => ({ view: m.view, bytes: m.blob.size }))
+
+        img.src = URL.createObjectURL(styledBlob)
+        const b64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(String(reader.result).split(',')[1] || '')
+          reader.onerror = reject
+          reader.readAsDataURL(styledBlob)
+        })
+        window.__blobBase64 = b64
+        window.__defaultB64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(String(reader.result).split(',')[1] || '')
+          reader.onerror = reject
+          reader.readAsDataURL(defaultBlob)
+        })
+        window.__renderPerf = OUT
+        status.textContent = JSON.stringify(OUT, null, 2)
+        document.title = 'PERF_OK'
+      } catch (error) {
+        OUT.error = String(error)
+        window.__renderPerf = OUT
+        window.__blobBase64 = null
+        status.textContent = String(error)
+        document.title = 'PERF_FAIL'
+        console.error(error)
+      }
+    </script>
+  </body>
+</html>

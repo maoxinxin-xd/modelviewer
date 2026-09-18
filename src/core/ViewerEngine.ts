@@ -34,7 +34,22 @@ export interface ViewerState {
   entryName: string
 }
 
-type StateListener = (state: ViewerState) => void
+export type StateListener = (state: ViewerState) => void
+
+export interface ViewerEngineOptions {
+  /** Renderer backing store size; falls back to container size @default container */
+  width?: number
+  height?: number
+  /** WebGL alpha (needed for transparent PNG/WebP) @default false */
+  alpha?: boolean
+  /** Device pixel ratio @default min(dpr, 2) */
+  pixelRatio?: number
+  /** Clear color; use null with alpha:true for transparent @default 0x000000 / alpha 0 */
+  clearColor?: number | string | null
+  clearAlpha?: number
+  /** Skip window resize binding (offscreen renders) @default false */
+  headless?: boolean
+}
 
 export class ViewerEngine {
   private container: HTMLElement
@@ -45,6 +60,8 @@ export class ViewerEngine {
   private activeCamera!: THREE.PerspectiveCamera | THREE.OrthographicCamera
   private controls!: OrbitControls
   private animationId = 0
+  private engineOptions: ViewerEngineOptions
+  private clearAlpha = 0
 
   private modelRoot: THREE.Group | null = null
   private currentBlob: Blob | null = null
@@ -64,7 +81,7 @@ export class ViewerEngine {
     hasModel: false,
     projectionMode: 'perspective',
     presetView: 'front',
-    textureMode: '贴图',
+    textureMode: 'textured',
     triangleCount: 0,
     isWhiteModel: false,
     favorited: false,
@@ -77,32 +94,76 @@ export class ViewerEngine {
     entryName: ''
   }
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, options: ViewerEngineOptions = {}) {
     this.container = container
+    this.engineOptions = options
     this.initRenderer()
     this.initCameras()
     this.initLights()
     this.initControls()
-    this.initEvents()
+    if (!options.headless) this.initEvents()
     this.animate()
   }
 
+  private getRenderSize() {
+    const w = this.engineOptions.width || this.container.clientWidth || 1
+    const h = this.engineOptions.height || this.container.clientHeight || 1
+    return { w, h }
+  }
+
   private initRenderer() {
+    const { w, h } = this.getRenderSize()
+    const alpha = this.engineOptions.alpha ?? false
+    const clearColor =
+      this.engineOptions.clearColor === undefined ? 0x000000 : this.engineOptions.clearColor
+    this.clearAlpha = this.engineOptions.clearAlpha ?? (alpha ? 0 : 1)
+
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
-      alpha: false,
+      alpha,
       preserveDrawingBuffer: true
     })
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    this.renderer.setSize(this.container.clientWidth, this.container.clientHeight)
+    this.renderer.setPixelRatio(
+      this.engineOptions.pixelRatio ?? Math.min(window.devicePixelRatio || 1, 2)
+    )
+    this.renderer.setSize(w, h)
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1
-    this.renderer.setClearColor(0x000000, 0)
+    if (clearColor === null) {
+      this.renderer.setClearColor(0x000000, 0)
+      this.clearAlpha = 0
+    } else {
+      this.renderer.setClearColor(clearColor as THREE.ColorRepresentation, this.clearAlpha)
+    }
     this.container.appendChild(this.renderer.domElement)
     this.renderer.domElement.style.display = 'block'
     this.renderer.domElement.style.width = '100%'
     this.renderer.domElement.style.height = '100%'
+  }
+
+  /** Resize drawing buffer (CSS size still 100% of container) */
+  setRenderSize(width: number, height: number) {
+    this.engineOptions.width = width
+    this.engineOptions.height = height
+    this.renderer.setSize(width, height)
+    this.perspectiveCamera.aspect = width / height
+    this.perspectiveCamera.updateProjectionMatrix()
+    this.handleResize()
+  }
+
+  /**
+   * Viewport clear color.
+   * `transparent` → alpha clear; hex/string → opaque color.
+   */
+  setBackground(background: 'transparent' | number | string) {
+    if (background === 'transparent') {
+      this.renderer.setClearColor(0x000000, 0)
+      this.clearAlpha = 0
+    } else {
+      this.renderer.setClearColor(background as THREE.ColorRepresentation, 1)
+      this.clearAlpha = 1
+    }
   }
 
   private initCameras() {
@@ -221,7 +282,7 @@ export class ViewerEngine {
       triangleCount: 0,
       presetView: 'front',
       projectionMode: 'perspective',
-      textureMode: '贴图'
+      textureMode: 'textured'
     })
     this.clearModel()
     // 替换后先回到默认灯光/相机曝光
@@ -292,7 +353,7 @@ export class ViewerEngine {
       entryName: result.entryName,
       materialStatus,
       isWhiteModel: !hasTextures,
-      textureMode: hasTextures ? '贴图' : '白膜',
+      textureMode: hasTextures ? 'textured' : 'clay',
       presetView: 'front',
       projectionMode: 'perspective'
     })
@@ -300,9 +361,9 @@ export class ViewerEngine {
     this.applyDefaultLighting()
 
     if (hasTextures) {
-      this.applyTextureMode('贴图')
+      this.applyTextureMode('textured')
     } else {
-      this.applyTextureMode('白膜')
+      this.applyTextureMode('clay')
     }
   }
 
@@ -407,8 +468,9 @@ export class ViewerEngine {
     this.patch({ projectionMode: type })
   }
 
-  setPresetView(view: PresetView) {
+  setPresetView(view: PresetView, options: { animate?: boolean } = {}) {
     if (!this.modelRoot) return
+    const animate = options.animate !== false
     const distance = this.activeCamera.position.distanceTo(this.controls.target)
     const target = this.controls.target.clone()
     let position = new THREE.Vector3()
@@ -431,7 +493,14 @@ export class ViewerEngine {
     }
 
     position.add(target)
-    this.animateCameraTo(position, target, 0.55)
+    if (animate) {
+      this.animateCameraTo(position, target, 0.55)
+    } else {
+      this.activeCamera.position.copy(position)
+      this.activeCamera.lookAt(target)
+      this.controls.target.copy(target)
+      this.controls.update()
+    }
     this.patch({ presetView: view })
   }
 
@@ -512,16 +581,16 @@ export class ViewerEngine {
     }
     this.patch({ textureMode: mode })
 
-    if (mode === '贴图') {
+    if (mode === 'textured') {
       this.restoreOriginalMaterial()
       this.renderer.toneMappingExposure = 1
-    } else if (mode === '白膜') {
+    } else if (mode === 'clay') {
       this.showWhiteModel()
       this.renderer.toneMappingExposure = 0.55
-    } else if (mode === '法线') {
+    } else if (mode === 'normal') {
       this.switchToNormalMapDisplay()
       this.renderer.toneMappingExposure = 1
-    } else if (mode === '反照') {
+    } else if (mode === 'albedo') {
       this.switchToAlbedoMap()
       this.renderer.toneMappingExposure = 0.9
     }
@@ -677,22 +746,53 @@ export class ViewerEngine {
   }
 
   async captureScreenshot(): Promise<Blob> {
+    return this.renderToBlob({ square: true, format: 'png' })
+  }
+
+  /**
+   * Render current scene to an image blob.
+   * `square: true` center-crops to 1:1 on the long side (product-shot style).
+   */
+  async renderToBlob(
+    options: {
+      format?: 'png' | 'jpeg' | 'webp'
+      quality?: number
+      square?: boolean
+      showGrid?: boolean
+    } = {}
+  ): Promise<Blob> {
+    const format = options.format ?? 'png'
+    const quality = options.quality ?? 0.92
+    const mime =
+      format === 'jpeg' ? 'image/jpeg' : format === 'webp' ? 'image/webp' : 'image/png'
+
     const previousGrid = this.gridHelper?.visible ?? false
-    this.setGridVisible(false)
+    const showGrid = options.showGrid ?? previousGrid
+    this.setGridVisible(showGrid)
     this.renderer.render(this.scene, this.activeCamera)
 
     const canvas = this.renderer.domElement
     const originalBlob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((blob) => {
-        if (blob) resolve(blob)
-        else reject(new Error('截图失败'))
-      }, 'image/png', 1)
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob)
+          else reject(new Error('截图失败'))
+        },
+        mime,
+        format === 'png' ? 1 : quality
+      )
     })
+
+    if (!options.square) {
+      this.setGridVisible(previousGrid)
+      this.renderer.render(this.scene, this.activeCamera)
+      return originalBlob
+    }
 
     this.setGridVisible(previousGrid)
     this.renderer.render(this.scene, this.activeCamera)
 
-    // 1:1 square crop, transparent padding
+    // 1:1 square crop, transparent / bg padding
     const img = await createImageBitmap(originalBlob)
     const longSide = Math.max(img.width, img.height)
     const out = document.createElement('canvas')
@@ -700,6 +800,10 @@ export class ViewerEngine {
     out.height = longSide
     const ctx = out.getContext('2d')
     if (!ctx) throw new Error('无法创建 canvas 上下文')
+    if (mime === 'image/jpeg') {
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, longSide, longSide)
+    }
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
     const x = (longSide - img.width) / 2
@@ -708,10 +812,14 @@ export class ViewerEngine {
     img.close()
 
     return await new Promise<Blob>((resolve, reject) => {
-      out.toBlob((blob) => {
-        if (blob) resolve(blob)
-        else reject(new Error('图片转换失败'))
-      }, 'image/png', 1)
+      out.toBlob(
+        (blob) => {
+          if (blob) resolve(blob)
+          else reject(new Error('图片转换失败'))
+        },
+        mime,
+        format === 'png' ? 1 : quality
+      )
     })
   }
 

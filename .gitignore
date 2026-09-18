@@ -1,5 +1,13 @@
 node_modules
 dist
+dist-demo
 .DS_Store
 *.local
 .vite
+*.tgz
+.playwright-cli/
+public/*.glb
+public/*.gltf
+public/*.zip
+
+

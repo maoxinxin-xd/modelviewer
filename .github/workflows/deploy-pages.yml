@@ -29,12 +29,13 @@ jobs:
         run: npm ci
       - name: Type-check
         run: npm run typecheck
-      - name: Build
+      - name: Build viewer demo
+        # Deploy the interactive model viewer UI (not the npm library dist/)
         run: npx vite build --base=/modelviewer/
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: dist-demo
 
   deploy:
     needs: build

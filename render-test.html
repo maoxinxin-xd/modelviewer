@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>renderModelImage smoke</title>
+  </head>
+  <body>
+    <div id="status">running…</div>
+    <script type="module">
+      import { renderModelImage, renderModelImages } from './src/core/renderModelImage.ts'
+
+      const status = document.getElementById('status')
+      const obj = [
+        'v -0.5 -0.5 -0.5',
+        'v  0.5 -0.5 -0.5',
+        'v  0.5  0.5 -0.5',
+        'v -0.5  0.5 -0.5',
+        'v -0.5 -0.5  0.5',
+        'v  0.5 -0.5  0.5',
+        'v  0.5  0.5  0.5',
+        'v -0.5  0.5  0.5',
+        'f 1 2 3',
+        'f 1 3 4',
+        'f 5 6 7',
+        'f 5 7 8',
+        'f 1 2 6',
+        'f 1 6 5',
+        'f 2 3 7',
+        'f 2 7 6',
+        'f 3 4 8',
+        'f 3 8 7',
+        'f 4 1 5',
+        'f 4 5 8'
+      ].join('\n')
+      const file = new File([obj], 'box.obj', { type: 'text/plain' })
+
+      try {
+        const blob = await renderModelImage({
+          model: file,
+          width: 256,
+          height: 256,
+          format: 'png',
+          background: '#1a1a1a',
+          presetView: 'front',
+          showGrid: false
+        })
+        const multi = await renderModelImages({
+          model: file,
+          width: 128,
+          views: ['front', 'side'],
+          format: 'png',
+          background: 'transparent'
+        })
+        const url = URL.createObjectURL(blob)
+        const img = new Image()
+        img.src = url
+        img.id = 'result'
+        document.body.appendChild(img)
+        window.__renderResult = {
+          ok: true,
+          size: blob.size,
+          type: blob.type,
+          multi: multi.map((m) => ({ view: m.view, size: m.blob.size, type: m.mime }))
+        }
+        status.textContent = `ok size=${blob.size} multi=${multi.length}`
+        document.title = 'RENDER_OK'
+      } catch (error) {
+        window.__renderResult = { ok: false, error: String(error) }
+        status.textContent = String(error)
+        document.title = 'RENDER_FAIL'
+        console.error(error)
+      }
+    </script>
+  </body>
+</html>

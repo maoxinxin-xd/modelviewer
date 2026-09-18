@@ -2,7 +2,8 @@ import * as THREE from 'three'
 
 export type ProjectionMode = 'perspective' | 'orthographic'
 export type PresetView = 'front' | 'back' | 'side' | 'top' | 'none'
-export type TextureMode = '贴图' | '白膜' | '法线' | '反照'
+/** Engine texture display modes (stable public API keys) */
+export type TextureMode = 'textured' | 'clay' | 'normal' | 'albedo'
 
 export const CAMERA_CONFIG = {
   PERSPECTIVE_FOV: 45,
