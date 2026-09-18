@@ -6,6 +6,8 @@ import { resolve } from 'node:path'
  * three / fflate stay external — consumers provide three (peer) and fflate (dep).
  */
 export default defineConfig({
+  // Do not copy public/ (demo models) into the npm package
+  publicDir: false,
   build: {
     outDir: 'dist',
     emptyOutDir: true,
