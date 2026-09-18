@@ -15,6 +15,14 @@ import {
   tryLoadMtlFromPack,
   type MaterialReport
 } from './MaterialResolver'
+import {
+  loadVrmlFromBuffer,
+  loadStepFromBuffer,
+  VRML_EXTENSIONS,
+  VRML_ACCEPT,
+  STEP_EXTENSIONS,
+  STEP_ACCEPT
+} from './experimental'
 
 export type ProgressCallback = (percent: number) => void
 
@@ -26,6 +34,8 @@ export interface LoadResult {
   materialReport: MaterialReport
   /** 实际加载的入口（ZIP 时为包内文件） */
   entryName: string
+  /** true = experimental format (VRML / STEP), simple preview only */
+  experimental?: boolean
 }
 
 const MODEL_EXTENSIONS = [
@@ -38,15 +48,28 @@ const MODEL_EXTENSIONS = [
   'dae',
   '3mf',
   '3ds',
-  'zip'
+  'zip',
+  ...VRML_EXTENSIONS,
+  ...STEP_EXTENSIONS
 ]
 
-export const SUPPORTED_ACCEPT =
-  '.glb,.gltf,.obj,.fbx,.stl,.ply,.dae,.3mf,.3ds,.zip'
+export const SUPPORTED_ACCEPT = [
+  '.glb,.gltf,.obj,.fbx,.stl,.ply,.dae,.3mf,.3ds,.zip',
+  VRML_ACCEPT,
+  STEP_ACCEPT
+].join(',')
 
 export function isSupportedModelFile(file: File): boolean {
   const ext = file.name.split('.').pop()?.toLowerCase() || ''
   return MODEL_EXTENSIONS.includes(ext)
+}
+
+export function isExperimentalModelFile(file: File): boolean {
+  const ext = file.name.split('.').pop()?.toLowerCase() || ''
+  return (
+    (VRML_EXTENSIONS as readonly string[]).includes(ext) ||
+    (STEP_EXTENSIONS as readonly string[]).includes(ext)
+  )
 }
 
 function ensureGroup(object: THREE.Object3D): THREE.Group {
@@ -120,6 +143,14 @@ export class ModelLoader {
       return this.loadFromZip(file, onProgress)
     }
 
+    if ((VRML_EXTENSIONS as readonly string[]).includes(ext)) {
+      return this.loadExperimentalFile(file, ext, onProgress)
+    }
+
+    if ((STEP_EXTENSIONS as readonly string[]).includes(ext)) {
+      return this.loadExperimentalFile(file, ext, onProgress)
+    }
+
     const url = URL.createObjectURL(file)
     try {
       const result = await this.loadFromUrl(url, ext, onProgress, file.name)
@@ -128,6 +159,46 @@ export class ModelLoader {
       return result
     } finally {
       URL.revokeObjectURL(url)
+    }
+  }
+
+  /** Experimental VRML / STEP — simple mesh preview, not production CAD fidelity */
+  private async loadExperimentalFile(
+    file: File,
+    ext: string,
+    onProgress?: ProgressCallback
+  ): Promise<LoadResult> {
+    onProgress?.(5)
+    const buffer = await file.arrayBuffer()
+    onProgress?.(30)
+
+    let object: THREE.Group
+    let materialReport: MaterialReport
+
+    if ((VRML_EXTENSIONS as readonly string[]).includes(ext)) {
+      const loaded = await loadVrmlFromBuffer(buffer, file.name)
+      object = loaded.object
+      materialReport = loaded.materialReport
+    } else if ((STEP_EXTENSIONS as readonly string[]).includes(ext)) {
+      const loaded = await loadStepFromBuffer(buffer, file.name)
+      object = loaded.object
+      materialReport = loaded.materialReport
+    } else {
+      throw new Error(`不支持的实验性格式: .${ext}`)
+    }
+
+    onProgress?.(80)
+    normalizeObject(object)
+    onProgress?.(100)
+
+    return {
+      object,
+      animations: [],
+      fileName: file.name,
+      fileBlob: file,
+      materialReport,
+      entryName: file.name,
+      experimental: true
     }
   }
 
@@ -244,6 +315,13 @@ export class ModelLoader {
         const mesh = new THREE.Mesh(geometry, defaultPbrMaterial())
         return ensureGroup(mesh)
       }
+      case 'wrl':
+      case 'vrml':
+      case 'step':
+      case 'stp':
+        throw new Error(
+          `实验性格式 .${ext} 请通过 loadFromFile / createModelViewer 的 File 入口加载（当前 URL 管线未接）`
+        )
       default:
         throw new Error(`不支持的模型格式: .${ext} (${name})`)
     }

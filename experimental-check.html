@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>experimental formats</title>
+    <style>
+      html,
+      body,
+      #app {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <pre id="log" style="position:fixed;left:8px;top:8px;z-index:99;color:#0f0;font:12px monospace;max-width:40vw"></pre>
+    <script type="module">
+      import { createModelViewer } from './src/index.ts'
+
+      const logEl = document.getElementById('log')
+      const log = (m) => {
+        logEl.textContent += m + '\n'
+        console.log(m)
+      }
+
+      const viewer = createModelViewer('#app', { locale: 'zh-CN' })
+
+      async function loadViaInput(name, url) {
+        try {
+          const res = await fetch(url)
+          if (!res.ok) throw new Error(`fetch ${res.status} ${url}`)
+          const blob = await res.blob()
+          const file = new File([blob], name)
+          const input = document.querySelector('[data-mv="fileInput"]')
+          const dt = new DataTransfer()
+          dt.items.add(file)
+          input.files = dt.files
+          input.dispatchEvent(new Event('change', { bubbles: true }))
+          // wait for load
+          await new Promise((r) => setTimeout(r, name.endsWith('.stp') ? 20000 : 3000))
+          log(
+            `RESULT ${name} face=${viewer.state.triangleCount} status=${viewer.state.materialStatus}`
+          )
+          window.__expResult = {
+            ok: viewer.state.triangleCount > 0,
+            name,
+            faces: viewer.state.triangleCount,
+            status: viewer.state.materialStatus
+          }
+        } catch (error) {
+          log(`FAIL ${name}: ${error}`)
+          window.__expResult = { ok: false, name, error: String(error) }
+        }
+      }
+
+      const mode = new URLSearchParams(location.search).get('mode') || 'vrml'
+      if (mode === 'vrml') {
+        await loadViaInput('experimental-box.wrl', '/experimental-box.wrl')
+        document.title = window.__expResult?.ok ? 'VRML_OK' : 'VRML_FAIL'
+      } else if (mode === 'step') {
+        // copy path exposed by vite via public symlink-ish URL
+        await loadViaInput('sample.stp', '/sample.step')
+        document.title = window.__expResult?.ok ? 'STEP_OK' : 'STEP_FAIL'
+      }
+    </script>
+  </body>
+</html>

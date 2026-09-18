@@ -28,7 +28,9 @@ export default defineConfig({
         id === 'three' ||
         id.startsWith('three/') ||
         id === 'fflate' ||
-        id.startsWith('fflate/'),
+        id.startsWith('fflate/') ||
+        id === 'occt-import-js' ||
+        id.startsWith('occt-import-js/'),
       output: {
         entryFileNames: '[name].js',
         chunkFileNames: 'chunks/[name]-[hash].js',

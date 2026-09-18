@@ -43,7 +43,7 @@ export interface ViewerCopy {
 
 const zhCN: ViewerCopy = {
   title: '3D 模型查看器',
-  emptyDesc: '支持 GLB/GLTF/OBJ/FBX/STL/PLY/DAE/3MF/3DS，以及含模型+贴图的 ZIP',
+  emptyDesc: '支持 GLB/GLTF/OBJ/FBX/STL/PLY/DAE/3MF/3DS、ZIP；实验性：VRML、STEP（简单展示）',
   modelInfo: '模型信息',
   fieldFile: '文件',
   fieldTopology: '拓扑',
@@ -85,7 +85,7 @@ const zhCN: ViewerCopy = {
 const enUS: ViewerCopy = {
   title: '3D Model Viewer',
   emptyDesc:
-    'GLB/GLTF/OBJ/FBX/STL/PLY/DAE/3MF/3DS, plus ZIP packs with model + textures',
+    'GLB/GLTF/OBJ/FBX/STL/PLY/DAE/3MF/3DS + ZIP; experimental: VRML, STEP (simple preview)',
   modelInfo: 'Model Info',
   fieldFile: 'File',
   fieldTopology: 'Topology',

@@ -334,7 +334,7 @@ export class ViewerEngine {
     const triangleCount = countTriangles(this.modelRoot)
     const hasTextures = this.detectHasTextures(this.modelRoot)
     const report = result.materialReport
-    const materialStatus =
+    const baseStatus =
       report.texturesMissing > 0
         ? `部分缺失（找到 ${report.texturesFound}）`
         : report.texturesFound > 0
@@ -342,6 +342,9 @@ export class ViewerEngine {
           : hasTextures
             ? 'Loader 内置'
             : '默认材质'
+    const materialStatus = result.experimental
+      ? `实验性展示 · ${baseStatus}`
+      : baseStatus
 
     this.patch({
       progress: 100,

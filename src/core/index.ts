@@ -1,7 +1,13 @@
 export { ViewerEngine } from './ViewerEngine'
 export type { ViewerState, ViewerEngineOptions } from './ViewerEngine'
-export { ModelLoader, isSupportedModelFile, SUPPORTED_ACCEPT } from './ModelLoader'
+export { ModelLoader, isSupportedModelFile, isExperimentalModelFile, SUPPORTED_ACCEPT } from './ModelLoader'
 export type { LoadResult, ProgressCallback } from './ModelLoader'
+export {
+  loadVrmlFromBuffer,
+  loadStepFromBuffer,
+  setStepWasmUrl,
+  getStepWasmUrl
+} from './experimental'
 export { createAssetPackFromZip } from './AssetPack'
 export type { AssetPack, VirtualFile } from './AssetPack'
 export { applyMaterialFallback, tryLoadMtlFromPack } from './MaterialResolver'

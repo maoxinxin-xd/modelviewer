@@ -53,7 +53,29 @@ const viewer = createModelViewer('#app', {
 |------|------|------|
 | 模型 | **GLB / GLTF / OBJ / FBX / STL / PLY / DAE / 3MF / 3DS** | 浏览器内直接解析 |
 | 资源包 | **ZIP** | 内含模型 + 贴图时自动选入口、映射路径 |
-| 暂不支持 | VRML、STEP 等 CAD | 建议先转为 GLB / OBJ 再导入 |
+| 实验性 | **VRML**（`.wrl` / `.vrml`） | three.js `VRMLLoader` 简单展示，复杂节点可能丢失 |
+| 实验性 | **STEP**（`.step` / `.stp`） | `occt-import-js` WASM 细分网格预览，非完整 CAD |
+| 暂不作为生产路径 | 工业级 CAD 还原 | 建议转 GLB/OBJ 再导入 |
+
+### 实验性 VRML / STEP
+
+仅保证「能打开看个大概形状」，**不承诺** B-Rep 精度、装配约束、PMI、任意 VRML 节点。
+
+```bash
+# STEP 需要可选依赖
+npm install mivo-model-viewer three occt-import-js
+```
+
+```ts
+import { setStepWasmUrl } from 'mivo-model-viewer/core'
+
+// 可选：自托管 WASM（默认用 unpkg CDN）
+// setStepWasmUrl('/occt-import-js.wasm')
+```
+
+- 通过 UI「导入」或 `load(file)` / `createModelViewer({ src: file })` 使用  
+- 材质栏会显示「实验性展示」  
+- 管线/大装配仍建议服务端转 GLB 后交给本 SDK
 
 **ZIP + 材质策略（明确边界）**
 
@@ -63,7 +85,7 @@ const viewer = createModelViewer('#app', {
 4. OBJ 尝试解析包内简易 MTL（Kd / map_Kd）
 5. 仍缺失：回落默认 PBR，并在 UI「材质」中显示状态
 
-**不会承诺**：任意 FBX 100% 还原、原生 VRML、服务端 CAD 转换。
+**不会承诺**：任意 FBX 100% 还原、工业级 STEP/VRML 还原、服务端 CAD 转换（STEP/VRML 仅为实验性简单展示）。
 
 ---
 
@@ -341,6 +363,8 @@ npm run typecheck
 npm run build        # npm 库产物 → dist/
 npm run build:pages  # GitHub Pages 站点 → dist-demo/
 ```
+
+STEP 实验性展示在 Demo 中需本地已安装 `occt-import-js`（devDependency 已包含）。
 
 仓库结构：
 
