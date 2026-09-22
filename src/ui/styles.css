@@ -761,3 +761,123 @@
     transform: translateY(0);
   }
 }
+
+/* 场景背景（全景图）：导入态与预览态共用同一个固定尺寸容器 */
+.mv-root .mv-panorama-slot {
+  position: relative;
+  width: 100%;
+  height: 96px;
+  border-radius: 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.mv-root .mv-panorama-slot:hover {
+  border-color: rgba(116, 94, 245, 0.7);
+  background: rgba(116, 94, 245, 0.08);
+}
+
+.mv-root .mv-panorama-slot:focus-within {
+  border-color: rgba(116, 94, 245, 0.7);
+}
+
+/* 铺满整块区域的透明按钮：点击即导入 / 替换，键盘可达性交给原生 button */
+.mv-root .mv-panorama-hit {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  cursor: pointer;
+}
+
+.mv-root .mv-panorama-hit:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -3px;
+}
+
+.mv-root .mv-panorama-slot.has-panorama {
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.mv-root .mv-panorama-empty {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.mv-root .mv-panorama-empty img {
+  width: 28px;
+  height: 28px;
+  opacity: 0.9;
+}
+
+.mv-root .mv-panorama-slot:hover .mv-panorama-empty {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.mv-root .mv-panorama-preview {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-color: #111111;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.mv-root .mv-panorama-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease;
+}
+
+/* 只有已经设置全景图时才出现 */
+.mv-root .mv-panorama-slot.has-panorama .mv-panorama-remove {
+  display: flex;
+}
+
+.mv-root .mv-panorama-slot.has-panorama:hover .mv-panorama-remove,
+.mv-root .mv-panorama-slot.has-panorama .mv-panorama-remove:focus-visible {
+  opacity: 1;
+}
+
+.mv-root .mv-panorama-remove:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.mv-root .mv-panorama-remove img {
+  width: 12px;
+  height: 12px;
+}
+
+/* 触屏没有 hover，删除按钮常驻 */
+@media (hover: none) {
+  .mv-root .mv-panorama-slot.has-panorama .mv-panorama-remove {
+    opacity: 1;
+  }
+}
+

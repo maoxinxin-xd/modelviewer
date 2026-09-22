@@ -207,9 +207,55 @@ const shots = await renderModelImages({
 | `lightAngle` / `lightIntensity` / `ambientIntensity` | 灯光 |
 | `square` | 长边 1:1 裁切 |
 | `showGrid` | 是否画参考网格，默认关 |
+| `panorama` | 等距圆柱（2:1）全景图，作为背景 + 环境光；URL \| Blob \| Texture |
 | `signal` | `AbortSignal` 可取消 |
 
 返回值：`renderModelImage` → `Blob`；`renderModelImages` → `{ blob, width, height, format, view, fileName }[]`。
+
+### 4. 720° 全景作为 3D 场景
+
+把一张 **2:1 的等距圆柱（equirectangular）全景图**当天空盒：模型站在庭院里，而不是浮在黑底上。
+默认同一张贴图还会作为环境光（IBL），模型明暗与场景保持一致。
+
+```ts
+import { createModelViewer } from 'mivo-model-viewer'
+
+const viewer = createModelViewer('#app', {
+  src: modelFile,
+  panorama: '/panoramas/garden-360.webp' // URL / Blob / THREE.Texture 都行
+})
+
+// 运行中切换；传 null 关闭，底色与网格自动恢复
+await viewer.setPanorama(otherUrl)
+await viewer.setPanorama(null)
+```
+
+底层引擎可以更细：
+
+```ts
+await engine.setPanorama(url, { environment: false, hideGrid: false }) // 只当背景、保留网格
+engine.clearPanorama()
+```
+
+离屏出图同样支持（`renderModelImage` 的选项里直接传）：
+
+```ts
+const blob = await renderModelImage({
+  model: file,
+  panorama: '/panoramas/garden-360.webp',
+  square: true
+})
+```
+
+默认 UI 里也能直接操作：**显示设置 → 场景背景**，点一下选图即导入；导入后按钮变成全景图预览，点预览即可替换，悬停时右上角出现移除图标。
+
+注意事项：
+
+- 图必须是 2:1 的等距圆柱投影（全景相机 / 全景 App 导出的 JPEG、WebP）；普通透视截图贴上去会明显拉伸。
+- 开全景时默认隐藏参考网格，关闭全景后自动恢复；`scene.environment` 复用同一张贴图，不需要额外 HDRI 文件。
+- 全景会铺满整个画面，开全景时即使传 `background: 'transparent'` 也拿不到透明底；要透明底就别传 `panorama`。
+- 传 `THREE.Texture` 时所有权归调用方（引擎不销毁它）；传 URL / Blob 由引擎创建并释放。
+- 全景只解决背景与环境光：地面接触阴影、机位取景距离仍按普通场景的规则走。
 
 ---
 
@@ -237,6 +283,7 @@ createModelViewer(
 |------|------|------|
 | `src` | `File \| Blob \| string` | 挂载后自动加载 |
 | `srcFileName` | `string` | `src` 为 Blob/无扩展名 URL 时的文件名 |
+| `panorama` | `string \| Blob \| Texture` | 等距圆柱（2:1）全景图作为场景背景；默认同时当环境光 |
 | `ui` | `boolean \| ModelViewerUIOptions` | `true` 全开 / 对象按面板开关 / `false` 无头 |
 | `theme` | `{ primary, text, panelBg, background }` | CSS 变量级换肤 |
 | `locale` | `'zh-CN' \| 'en-US'` | 默认 UI 文案 |
@@ -254,11 +301,56 @@ createModelViewer(
 | `setPresetView('front' \| 'back' \| 'side' \| 'top')` | 预设机位（球面插值动画） |
 | `setTextureMode('textured' \| 'clay' \| 'normal' \| 'albedo')` | 贴图显示模式 |
 | `setLightIntensity` / `setAmbientIntensity` / `setLightAngle` | 灯光 |
+| `setPanorama(source \| null)` | 切换 / 关闭全景图场景背景 |
 | `captureScreenshot(): Promise<Blob>` | 1:1 PNG |
 | `exportModel(): Blob \| null` | 导出源文件 |
 | `dispose()` | 释放资源 |
 | `engine` | 底层 `ViewerEngine` 逃生舱 |
 | `root` / `state` | 根节点与当前状态 |
+
+### 5. 作为基座：自建场景 / 导演台
+
+不想要默认 UI、或者要做自己的 3D 应用（多模型编排、导演台、批量出图）时，有三层用法：
+
+```ts
+// ① 纯函数：完全不依赖 ViewerEngine
+import {
+  loadModelObject,   // File | Blob | URL → { object, animations, materialReport }
+  applyPanorama,     // 全景 → 任意 scene 的背景 + IBL（返回可还原的 handle）
+  computeFocusPose,  // 计算「把对象框进画面」的相机位姿（不修改对象）
+  focusCameraOn,     // 直接应用，含控制器距离约束
+  captureView        // 任意 renderer / scene / camera → Blob（不改页面布局）
+} from 'mivo-model-viewer/core'
+
+const a = await loadModelObject(fileA)                        // 默认居中到原点
+const b = await loadModelObject(fileB, { center: false })     // 多模型编排：保留原始坐标
+const pano = await applyPanorama(myScene, '/garden.webp', { backgroundBlurriness: 0.3 })
+pano.dispose()                                                // 还原 scene 并释放贴图
+
+// ② 引擎扩展点：需要画布 / 轨道控制器时
+const viewer = createModelViewer('#app', { ui: false })
+const engine = viewer.engine
+engine.getScene().add(new THREE.GridHelper())                 // 原生 three 对象随便用
+engine.setControlsEnabled(false)
+engine.setCamera({ position: [3, 2, 4], fov: 32 })
+engine.focusObject(engine.getModelRoot())
+const off = engine.onBeforeRender(({ delta }) => mixer.update(delta))  // 推进动画 / 时间轴
+engine.setAutoRender(false)                                   // 关掉自动渲染
+engine.renderFrame({ delta: 1 / 30 })                         // 确定性手动出帧
+const blob = await engine.captureFrame({ width: 1920, height: 1080 })
+
+// ③ 接管渲染管线（EffectComposer 等）
+engine.setRenderCallback(() => composer.render())
+
+// 多机位批量出图
+for (const shot of shots) {
+  engine.setCamera(shot)
+  await engine.captureFrame({ width: 1600, height: 900, format: 'jpeg' })
+}
+```
+
+SDK 的边界（有意为之）：只做「资产导入 + 环境 + 取景 + 出帧」。
+时间轴、关键帧、多对象管理、动画播放器、工程文件格式留给上层。
 
 **`ViewerEngine`（core，UI 无关）**
 
@@ -271,10 +363,21 @@ createModelViewer(
 | `renderToBlob({ format, quality, square, showGrid })` | 灵活出图 |
 | `captureScreenshot()` | 1:1 PNG（等价 `renderToBlob({ square: true })`） |
 | `setRenderSize(w, h)` / `setBackground(color \| 'transparent')` | 离屏尺寸与底色 |
+| `setPanorama(source, { environment, hideGrid })` / `clearPanorama()` | 全景图背景 + 可选环境光（IBL） |
+| `getScene()` / `getRenderer()` / `getCamera()` / `getControls()` / `getCanvas()` | 原生 three 对象逃生舱（自建 UI、后处理、raycast） |
+| `getModelRoot()` / `getAnimations()` | 模型根节点与动画 clip（引擎不自动播放） |
+| `addObject(obj)` / `removeObject(obj, { dispose })` | 往场景加自定义对象（灯光、道具、辅助器） |
+| `onBeforeRender(cb)` / `onAfterRender(cb)` / `setRenderCallback(fn)` | 帧钩子与自定义渲染管线（EffectComposer） |
+| `setAutoRender(false)` / `renderFrame({ delta })` | 暂停自动渲染、手动确定性出帧（序列帧导出） |
+| `setCamera({ position, target, fov })` / `focusObject(obj)` / `setControlsEnabled(v)` | 相机与交互控制 |
+| `captureFrame({ width, height, format, pixelRatio })` | 按尺寸出图（不裁切，走当前渲染管线） |
 | `exportCurrentModel` / `setGridVisible` / `hasValidModel` / `dispose` | 导出与销毁 |
 
+**自建场景工具（core）**  
+`loadModelObject` · `applyPanorama` · `loadPanoramaTexture` · `computeFocusPose` · `focusCameraOn` · `captureView`
+
 **工具与常量（core）**  
-`isSupportedModelFile` · `SUPPORTED_ACCEPT` · `CAMERA_CONFIG` · `countTriangles` · `getModelDiagonal` · `hasValidModelDimensions` · `disposeObject3D` · `calculateOrthographicViewSize` · `sphericalToCartesian` · `extractAlbedoFromMaterial`
+`isSupportedModelFile` · `SUPPORTED_ACCEPT` · `CAMERA_CONFIG` · `countTriangles` · `getModelDiagonal` · `hasValidModelDimensions` · `disposeObject3D` · `calculateOrthographicViewSize` · `sphericalToCartesian` · `extractAlbedoFromMaterial` · `loadPanoramaTexture`
 
 **离屏出图（core）**  
 `renderModelImage` · `renderModelImages` · `renderModelImageDetailed` · `renderModelImageObjectURL` · `renderModelImageDataUrl` · `resolveModelInput` · `resolveModelFileName` · `sniffBlobExtension`
@@ -357,6 +460,7 @@ flowchart TB
 
 | 场景 | 用法 |
 |------|------|
+| 场景化展示（商品 / 角色置身实景） | 默认 UI + `panorama` 全景图（2:1 等距圆柱） |
 | 资产库 / 作品详情 | 默认 UI，`ui.export = false`，主题对齐设计系统 |
 | 审核后台 | 默认 UI + `onStateChange` 同步审核侧栏 |
 | 配置器 / 编辑器 | `ui: false`，自绘工具条，调用 `set*` API |
@@ -395,7 +499,7 @@ GitHub Pages：推送到 `main` 后由 Actions 构建 Demo 并部署（站点路
 
 ## 发布
 
-包已发布：`mivo-model-viewer@0.1.0`（账号 `miragari`）。
+包已发布：`mivo-model-viewer@0.4.0`（账号 `miragari`）。
 
 ```bash
 npm run build

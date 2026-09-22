@@ -13,6 +13,8 @@ import textured from '../icons/贴图.svg'
 import clay from '../icons/白模.svg'
 import normal from '../icons/法线.svg'
 import albedo from '../icons/反照.svg'
+import upload from '../icons/upload.svg'
+import close from '../icons/close.svg'
 
 export const icons = {
   perspective,
@@ -25,5 +27,7 @@ export const icons = {
   textured,
   clay,
   normal,
-  albedo
+  albedo,
+  upload,
+  close
 } as const

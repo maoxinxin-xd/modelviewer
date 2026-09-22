@@ -2,7 +2,8 @@ import type {
   PresetView,
   ProjectionMode,
   TextureMode,
-  ViewerState
+  ViewerState,
+  PanoramaSource
 } from '../core'
 import type { Locale } from './i18n'
 
@@ -33,6 +34,8 @@ export interface ModelViewerUIOptions {
   screenshot?: boolean
   /** Texture-mode switch group @default true */
   textureModes?: boolean
+  /** 「场景背景」全景图导入控件 @default true */
+  panorama?: boolean
   /** Built-in toast notifications @default true */
   toasts?: boolean
   /** Empty-state hint over canvas @default true */
@@ -65,6 +68,11 @@ export interface ModelViewerOptions {
    */
   ui?: boolean | ModelViewerUIOptions
   theme?: ModelViewerTheme
+  /**
+   * 等距圆柱（2:1）全景图作为 3D 场景背景：URL / Blob / Texture。
+   * 默认同时用作环境光，模型更容易融进场景。
+   */
+  panorama?: PanoramaSource
   locale?: Locale
   defaults?: {
     lightIntensity?: number
@@ -90,6 +98,8 @@ export interface ModelViewerInstance {
   setLightIntensity(value: number): void
   setAmbientIntensity(value: number): void
   setLightAngle(angle: number): void
+  /** 切换 / 关闭（传 null）全景图场景背景 */
+  setPanorama(source: PanoramaSource | null): Promise<void>
   captureScreenshot(): Promise<Blob>
   exportModel(): Blob | null
   dispose(): void

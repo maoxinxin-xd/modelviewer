@@ -6,7 +6,8 @@ import {
   type PresetView,
   type ProjectionMode,
   type TextureMode,
-  type ViewerState
+  type ViewerState,
+  type PanoramaSource
 } from '../core'
 import { icons } from './icons'
 import { resolveCopy, type Locale, type ViewerCopy } from './i18n'
@@ -50,6 +51,7 @@ function normalizeUi(ui: ModelViewerOptions['ui']): Required<ModelViewerUIOption
     export: true,
     screenshot: true,
     textureModes: true,
+    panorama: true,
     toasts: true,
     emptyHint: true,
     loadingOverlay: true
@@ -63,6 +65,7 @@ function normalizeUi(ui: ModelViewerOptions['ui']): Required<ModelViewerUIOption
       export: false,
       screenshot: false,
       textureModes: false,
+      panorama: false,
       toasts: false,
       emptyHint: false,
       loadingOverlay: false
@@ -175,6 +178,23 @@ function buildTemplate(copy: ViewerCopy, ui: Required<ModelViewerUIOptions>) {
                     <button type="button" class="mv-preset-btn" data-view="top" data-mv="btnTop" title="${copy.top}"><img src="${icons.top}" alt="${copy.top}" /></button>
                   </div>
                 </div>
+                ${ui.panorama ? `
+                <div class="mv-field">
+                  <div class="mv-field-label">${copy.sceneBackground}</div>
+                  <div class="mv-panorama-slot" data-mv="panoramaSlot">
+                    <div class="mv-panorama-preview hidden" data-mv="panoramaPreview"></div>
+                    <div class="mv-panorama-empty" data-mv="panoramaEmpty">
+                      <img src="${icons.upload}" alt="" />
+                      <span>${copy.importPanorama}</span>
+                    </div>
+                    <button type="button" class="mv-panorama-hit" data-mv="panoramaPick" title="${copy.importPanorama}" aria-label="${copy.importPanorama}"></button>
+                    <button type="button" class="mv-panorama-remove" data-mv="panoramaRemove" title="${copy.removePanorama}" aria-label="${copy.removePanorama}">
+                      <img src="${icons.close}" alt="" />
+                    </button>
+                  </div>
+                  <input class="mv-file-input" data-mv="panoramaInput" type="file" accept="image/*" />
+                </div>
+` : ''}
               </section>
               <div class="mv-divider"></div>
               <section class="mv-section">
@@ -276,6 +296,8 @@ class ModelViewer implements ModelViewerInstance {
   private disposed = false
   private screenshotting = false
   private dragging = false
+  /** DOM 里当前展示的预览地址（真源在引擎侧，这里只做镜像） */
+  private panoramaPreviewUrl: string | null = null
 
   private refs: {
     loading: HTMLElement | null
@@ -303,6 +325,12 @@ class ModelViewer implements ModelViewerInstance {
     btnImport: HTMLButtonElement | null
     btnExport: HTMLButtonElement | null
     fileInput: HTMLInputElement | null
+    panoramaSlot: HTMLElement | null
+    panoramaEmpty: HTMLElement | null
+    panoramaPreview: HTMLElement | null
+    panoramaPick: HTMLButtonElement | null
+    panoramaRemove: HTMLButtonElement | null
+    panoramaInput: HTMLInputElement | null
     dialSphere: HTMLElement | null
     dialTint: HTMLElement | null
     shaderRound: HTMLElement | null
@@ -341,6 +369,12 @@ class ModelViewer implements ModelViewerInstance {
     this.refs = this.bindRefs()
     this.bindEngine()
     this.bindUi()
+
+    if (options.panorama) {
+      void this.setPanorama(options.panorama).catch((error) => {
+        console.error('[model-viewer] failed to set panorama', error)
+      })
+    }
 
     if (options.src) {
       void this.load(options.src, { fileName: options.srcFileName }).catch((error) => {
@@ -402,6 +436,12 @@ class ModelViewer implements ModelViewerInstance {
       btnImport: this.qi<HTMLButtonElement>('btnImport'),
       btnExport: this.qi<HTMLButtonElement>('btnExport'),
       fileInput: this.qi<HTMLInputElement>('fileInput'),
+      panoramaSlot: this.q('panoramaSlot'),
+      panoramaEmpty: this.q('panoramaEmpty'),
+      panoramaPreview: this.q('panoramaPreview'),
+      panoramaPick: this.qi<HTMLButtonElement>('panoramaPick'),
+      panoramaRemove: this.qi<HTMLButtonElement>('panoramaRemove'),
+      panoramaInput: this.qi<HTMLInputElement>('panoramaInput'),
       dialSphere: this.q('dialSphere'),
       dialTint: this.q('dialTint'),
       shaderRound: this.q('shaderRound'),
@@ -532,6 +572,14 @@ class ModelViewer implements ModelViewerInstance {
       ambientSlider.value = String(state.ambientIntensity)
       ambientNumber.value = String(state.ambientIntensity)
       updateSliderFill(ambientSlider)
+    }
+
+    // 预览只跟随引擎：外部直接调 engine.setPanorama / clearPanorama 也能同步
+    this.syncPanoramaPreview()
+    if (this.refs.panoramaPick) {
+      const label = state.hasPanorama ? this.copy.replacePanorama : this.copy.importPanorama
+      this.refs.panoramaPick.setAttribute('aria-label', label)
+      this.refs.panoramaPick.setAttribute('title', label)
     }
   }
 
@@ -676,6 +724,31 @@ class ModelViewer implements ModelViewerInstance {
 
     on(this.refs.btnImport, 'click', () => this.refs.fileInput?.click())
 
+    on(this.refs.panoramaPick, 'click', () => this.refs.panoramaInput?.click())
+
+    on(this.refs.panoramaRemove, 'click', async () => {
+      try {
+        await this.setPanorama(null)
+      } catch (error) {
+        console.error(error)
+        if (!this.disposed) this.toast(this.copy.toastPanoramaFail, 'error')
+      }
+    })
+
+    on(this.refs.panoramaInput, 'change', async () => {
+      const input = this.refs.panoramaInput
+      const file = input?.files?.[0]
+      if (input) input.value = ''
+      if (!file) return
+      try {
+        await this.setPanorama(file)
+        if (!this.disposed) this.toast(this.copy.toastPanoramaOk, 'success')
+      } catch (error) {
+        console.error(error)
+        if (!this.disposed) this.toast(this.copy.toastPanoramaFail, 'error')
+      }
+    })
+
     on(this.refs.fileInput, 'change', async () => {
       const input = this.refs.fileInput as HTMLInputElement | null
       const file = input?.files?.[0]
@@ -771,6 +844,40 @@ class ModelViewer implements ModelViewerInstance {
     this.engine.setLightAngle(angle)
   }
 
+  /** 切换全景图场景背景；传 null 关闭（同步「显示设置」里的预览） */
+  async setPanorama(source: PanoramaSource | null) {
+    if (this.disposed) throw new Error('[model-viewer] instance disposed')
+    await this.engine.setPanorama(source)
+    if (this.disposed) return
+    this.syncPanoramaPreview()
+  }
+
+  /** 让「场景背景」控件跟随引擎：有全景显示预览图，没有则回到导入按钮 */
+  private syncPanoramaPreview() {
+    const url = this.engine.state.hasPanorama ? this.engine.panoramaSourceUrl : null
+    if (url !== this.panoramaPreviewUrl) this.setPanoramaPreview(url)
+  }
+
+  /** 更新「场景背景」控件：有地址显示预览图，null 回到导入按钮 */
+  private setPanoramaPreview(url: string | null) {
+    this.panoramaPreviewUrl = url
+
+    const preview = this.refs.panoramaPreview
+    const empty = this.refs.panoramaEmpty
+    if (!preview || !empty) return
+    if (url) {
+      preview.style.backgroundImage = 'url(' + JSON.stringify(url) + ')'
+      preview.classList.remove('hidden')
+      empty.classList.add('hidden')
+      this.refs.panoramaSlot?.classList.add('has-panorama')
+    } else {
+      preview.style.backgroundImage = ''
+      preview.classList.add('hidden')
+      empty.classList.remove('hidden')
+      this.refs.panoramaSlot?.classList.remove('has-panorama')
+    }
+  }
+
   captureScreenshot() {
     return this.engine.captureScreenshot()
   }
@@ -784,6 +891,7 @@ class ModelViewer implements ModelViewerInstance {
     this.disposed = true
     this.cleanups.forEach((fn) => fn())
     this.cleanups = []
+    this.panoramaPreviewUrl = null
     this.engine.dispose()
     this.root.remove()
   }

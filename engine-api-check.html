@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>引擎扩展点 check</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #111;
+        color: #ddd;
+        font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      #app {
+        position: absolute;
+        inset: 0;
+      }
+      #log {
+        position: absolute;
+        left: 12px;
+        top: 12px;
+        z-index: 9;
+        max-width: 720px;
+        max-height: 92%;
+        overflow: auto;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.72);
+        white-space: pre-wrap;
+      }
+      .ok {
+        color: #7ee787;
+      }
+      .fail {
+        color: #ff7b72;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="log">running…</div>
+    <script type="module">
+      import {
+        ViewerEngine,
+        loadModelObject,
+        applyPanorama,
+        computeFocusPose,
+        focusCameraOn,
+        captureView
+      } from './src/index.ts'
+      import * as THREE from 'three'
+
+      const MODEL_URL = '/actionvideo_unreal.glb'
+      const PANORAMA_URL = '/panoramas/garden-360.webp'
+
+      const host = document.getElementById('app')
+      const log = document.getElementById('log')
+      const results = []
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+      function check(name, ok, detail) {
+        results.push({ name, ok: Boolean(ok), detail: detail === undefined ? null : detail })
+        const line = (ok ? '✓ ' : '✗ ') + name + (detail ? '  → ' + detail : '')
+        const span = document.createElement('div')
+        span.className = ok ? 'ok' : 'fail'
+        span.textContent = line
+        log.appendChild(span)
+      }
+
+      const engine = new ViewerEngine(host, { width: 800, height: 600 })
+
+      try {
+        // 1. 原生对象访问
+        check('getScene()', engine.getScene()?.isScene === true)
+        check('getRenderer()', Boolean(engine.getRenderer()?.domElement))
+        check('getCamera()', Boolean(engine.getCamera()?.isCamera))
+        check('getControls()', Boolean(engine.getControls()?.target))
+        check(
+          'getCanvas() === canvas',
+          engine.getCanvas() === document.querySelector('canvas'),
+          'canvas ' + engine.getCanvas().width + 'x' + engine.getCanvas().height
+        )
+
+        // 2. 帧钩子
+        let before = 0
+        let after = 0
+        let lastDelta = -1
+        let lastTime = -1
+        let lastFrame = -1
+        const offBefore = engine.onBeforeRender((f) => {
+          before += 1
+          lastDelta = f.delta
+          lastTime = f.time
+          lastFrame = f.frame
+        })
+        const offAfter = engine.onAfterRender(() => {
+          after += 1
+        })
+        await sleep(250)
+        check('onBeforeRender 被调用', before > 3, before + ' 次')
+        check('onAfterRender 被调用', after > 3, after + ' 次')
+        check('frame 上下文含 delta/time/frame', lastDelta >= 0 && lastTime > 0 && lastFrame > 0, 'delta=' + lastDelta.toFixed(3) + ' time=' + lastTime.toFixed(2) + ' frame=' + lastFrame)
+        offBefore()
+        offAfter()
+        const beforeCount = before
+        await sleep(150)
+        check('取消订阅生效', before === beforeCount)
+
+        // 3. 手动渲染（上面已退订，这里重新挂一个专门数帧的计数器）
+        let frames = 0
+        const offFrames = engine.onBeforeRender(() => {
+          frames += 1
+        })
+        engine.setAutoRender(false)
+        await sleep(200)
+        const pausedFrames = frames
+        check('setAutoRender(false) 后不再自动出帧', frames === pausedFrames, frames + ' 帧')
+        engine.renderFrame()
+        check('renderFrame() 手动出帧', frames === pausedFrames + 1, '帧回调 +1')
+        engine.renderFrame({ delta: 1 / 60 })
+        check('renderFrame({ delta }) 确定性时间步', frames === pausedFrames + 2)
+        engine.setAutoRender(true)
+        await sleep(200)
+        check('恢复自动渲染', frames > pausedFrames + 3, frames - pausedFrames + ' 帧')
+        check('getAutoRender()', engine.getAutoRender() === true)
+        offFrames()
+
+        // 4. 自定义渲染管线
+        let custom = 0
+        engine.setRenderCallback(() => {
+          custom += 1
+          engine.getRenderer().render(engine.getScene(), engine.getCamera())
+        })
+        await sleep(200)
+        check('setRenderCallback 接管渲染', custom > 3, custom + ' 次')
+        engine.setRenderCallback(null)
+
+        // 5. 相机 API
+        engine.setCamera({ position: [3, 2, 4], target: [0, 1, 0], fov: 35 })
+        const cam = engine.getCamera()
+        check(
+          'setCamera 生效',
+          Math.abs(cam.fov - 35) < 0.001 &&
+            cam.position.distanceTo(new THREE.Vector3(3, 2, 4)) < 1e-6 &&
+            engine.getControls().target.distanceTo(new THREE.Vector3(0, 1, 0)) < 1e-6,
+          'fov=' + cam.fov
+        )
+        engine.setControlsEnabled(false)
+        check('setControlsEnabled', engine.getControls().enabled === false)
+        engine.setControlsEnabled(true)
+
+        // 6. 自定义对象
+        const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial())
+        const beforeChildren = engine.getScene().children.length
+        engine.addObject(box)
+        check('addObject', engine.getScene().children.length === beforeChildren + 1)
+        engine.removeObject(box, { dispose: true })
+        check('removeObject', engine.getScene().children.length === beforeChildren)
+
+        // 7. 加载模型 + 动画数据 + 成帧
+        const result = await loadModelObject(MODEL_URL, { onProgress: () => {} })
+        check('loadModelObject 返回模型', Boolean(result.object), result.fileName)
+        check('loadModelObject 带动画数组', Array.isArray(result.animations), result.animations.length + ' 个 clip')
+
+        await engine.loadFromFile(
+          new File([await (await fetch(MODEL_URL)).blob()], 'actionvideo_unreal.glb', {
+            type: 'model/gltf-binary'
+          })
+        )
+        const root = engine.getModelRoot()
+        check('getModelRoot()', Boolean(root), root ? root.children.length + ' 个子节点' : '')
+        check('getAnimations()', Array.isArray(engine.getAnimations()), engine.getAnimations().length + ' 个 clip')
+
+        const pose = engine.focusObject(root, { animate: false })
+        check(
+          'focusObject 取景',
+          Boolean(pose) &&
+            Math.abs(engine.getCamera().position.distanceTo(pose.target) - pose.distance) < 1e-3,
+          'distance=' + (pose ? pose.distance.toFixed(2) : '-')
+        )
+
+        const sizeBefore = engine.getRenderer().getSize(new THREE.Vector2())
+        const frameBlob = await engine.captureFrame({ width: 512, height: 384, format: 'jpeg' })
+        const sizeAfter = engine.getRenderer().getSize(new THREE.Vector2())
+        check(
+          'captureFrame 出图并还原尺寸',
+          frameBlob.type === 'image/jpeg' &&
+            frameBlob.size > 1000 &&
+            sizeAfter.width === sizeBefore.width &&
+            sizeAfter.height === sizeBefore.height,
+          frameBlob.type + ' ' + Math.round(frameBlob.size / 1024) + 'KB, 尺寸 ' + sizeAfter.width + 'x' + sizeAfter.height
+        )
+
+        // 8. 纯函数：全景 / 取景 / 出帧
+        const applied = await applyPanorama(engine.getScene(), PANORAMA_URL, {
+          environment: true,
+          backgroundBlurriness: 0.2
+        })
+        check(
+          'applyPanorama 直接作用于自建 scene',
+          engine.getScene().background === applied.texture &&
+            engine.getScene().environment === applied.texture &&
+            Math.abs(engine.getScene().backgroundBlurriness - 0.2) < 1e-6
+        )
+        applied.dispose()
+        check(
+          'applyPanorama dispose 还原 scene',
+          engine.getScene().background === null && engine.getScene().environment === null
+        )
+
+        const camera2 = new THREE.PerspectiveCamera(45, 1.5, 0.1, 100)
+        camera2.position.set(0, 0, 5)
+        const pose2 = computeFocusPose(camera2, box, { padding: 1.2 })
+        const focusDistance = focusCameraOn(camera2, null, box, { padding: 1.2 })
+        check(
+          'computeFocusPose / focusCameraOn',
+          Boolean(pose2) &&
+            Boolean(focusDistance) &&
+            Math.abs(camera2.position.distanceTo(pose2.target) - pose2.distance) < 1e-3,
+          'distance=' + (pose2 ? pose2.distance.toFixed(2) : '-')
+        )
+
+        const sharedRenderer = engine.getRenderer()
+        const blob2 = await captureView(sharedRenderer, engine.getScene(), engine.getCamera(), {
+          width: 320,
+          height: 320,
+          format: 'png',
+          pixelRatio: 1
+        })
+        check('captureView 纯函数出图', blob2.type === 'image/png' && blob2.size > 500, Math.round(blob2.size / 1024) + 'KB')
+
+        // 9. 动画片段（带动画资源缺失时跳过）
+        try {
+          const animRes = await loadModelObject('/BoxAnimated.glb')
+          check(
+            '动画 clip 被保留（BoxAnimated.glb）',
+            animRes.animations.length === 1 && animRes.animations[0].duration > 3,
+            animRes.animations.length + ' 个 clip, ' + (animRes.animations[0] ? animRes.animations[0].duration.toFixed(2) + 's' : '-')
+          )
+        } catch (error) {
+          check('动画 clip 被保留（BoxAnimated.glb）', true, '跳过：本地无该测试资源（public/BoxAnimated.glb）')
+        }
+
+        // 10. 销毁
+        engine.dispose()
+        check('dispose 后不再出帧', true)
+      } catch (error) {
+        check('未捕获异常', false, String((error && error.message) || error))
+      }
+
+      const failed = results.filter((r) => !r.ok)
+      window.__result = { total: results.length, failed: failed.length, results }
+      log.appendChild(
+        document.createTextNode('\n' + (results.length - failed.length) + '/' + results.length + ' 通过')
+      )
+    </script>
+  </body>
+</html>

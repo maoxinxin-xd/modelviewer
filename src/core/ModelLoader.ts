@@ -79,18 +79,24 @@ function ensureGroup(object: THREE.Object3D): THREE.Group {
   return group
 }
 
-function normalizeObject(root: THREE.Object3D) {
-  const box = new THREE.Box3().setFromObject(root)
-  if (box.isEmpty()) return
-  const center = new THREE.Vector3()
-  box.getCenter(center)
-  root.position.sub(center)
+function normalizeObject(root: THREE.Object3D, options: ModelLoadOptions = {}) {
+  const shouldCenter = options.center ?? true
+  const shouldShadow = options.shadows ?? true
+
+  if (shouldCenter) {
+    const box = new THREE.Box3().setFromObject(root)
+    if (!box.isEmpty()) {
+      const center = new THREE.Vector3()
+      box.getCenter(center)
+      root.position.sub(center)
+    }
+  }
 
   root.traverse((child) => {
     const mesh = child as THREE.Mesh
     if (mesh.isMesh) {
-      mesh.castShadow = true
-      mesh.receiveShadow = true
+      mesh.castShadow = shouldShadow
+      mesh.receiveShadow = shouldShadow
       if (!mesh.geometry.attributes.normal) {
         mesh.geometry.computeVertexNormals()
       }
@@ -116,10 +122,19 @@ function defaultPbrMaterial(color = 0xb0b0b0): THREE.MeshStandardMaterial {
   })
 }
 
+export interface ModelLoadOptions {
+  /** 是否把模型包围盒中心移到原点 @default true；多模型编排建议 false，保留原始坐标 */
+  center?: boolean
+  /** 是否自动设置 castShadow / receiveShadow @default true */
+  shadows?: boolean
+}
+
 export class ModelLoader {
   private draco: DRACOLoader | null = null
   private manager = new THREE.LoadingManager()
   private activePack: AssetPack | null = null
+  /** 本次加载的选项（ModelLoader 一次只加载一个模型，与 activePack 的生命周期一致） */
+  private loadOptions: ModelLoadOptions = {}
 
   constructor() {
     this.draco = new DRACOLoader()
@@ -135,8 +150,13 @@ export class ModelLoader {
     }
   }
 
-  async loadFromFile(file: File, onProgress?: ProgressCallback): Promise<LoadResult> {
+  async loadFromFile(
+    file: File,
+    onProgress?: ProgressCallback,
+    options: ModelLoadOptions = {}
+  ): Promise<LoadResult> {
     const ext = file.name.split('.').pop()?.toLowerCase() || ''
+    this.loadOptions = options
     this.releasePack()
 
     if (ext === 'zip') {
@@ -188,7 +208,7 @@ export class ModelLoader {
     }
 
     onProgress?.(80)
-    normalizeObject(object)
+    normalizeObject(object, this.loadOptions)
     onProgress?.(100)
 
     return {
@@ -247,7 +267,7 @@ export class ModelLoader {
         materialReport = emptyReport('GLTF/GLB 自带材质')
       }
 
-      normalizeObject(object)
+      normalizeObject(object, this.loadOptions)
       onProgress?.(100)
       return {
         object,
@@ -277,7 +297,11 @@ export class ModelLoader {
         if (this.draco) loader.setDRACOLoader(this.draco)
         loader.setMeshoptDecoder(MeshoptDecoder)
         const gltf = await loader.loadAsync(url)
-        return ensureGroup(gltf.scene)
+        const group = ensureGroup(gltf.scene)
+        // GLTFLoader 把动画挂在 gltf.animations 上（不在 scene 上），这里补挂到 Object3D，
+        // 上层才拿得到（ViewerEngine.getAnimations / 导演台时间轴）
+        group.animations = gltf.animations || []
+        return group
       }
       case 'obj': {
         const loader = new OBJLoader(manager)
@@ -295,6 +319,7 @@ export class ModelLoader {
       case 'dae': {
         const loader = new ColladaLoader(manager)
         const collada = await loader.loadAsync(url)
+        // ColladaLoader 已经把动画挂在 scene.animations 上，ensureGroup 后即可被上层读到
         return ensureGroup(collada.scene)
       }
       case '3mf': {
@@ -366,7 +391,7 @@ export class ModelLoader {
       materialReport = emptyReport('OBJ 未提供外挂 MTL/贴图时使用默认材质')
     }
 
-    normalizeObject(object)
+    normalizeObject(object, this.loadOptions)
     return {
       object,
       animations: (object.animations as THREE.AnimationClip[]) || [],

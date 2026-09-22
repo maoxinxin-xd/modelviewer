@@ -1,6 +1,7 @@
 import { ViewerEngine } from './ViewerEngine'
 import { isSupportedModelFile } from './ModelLoader'
 import { resolveModelFileName } from './modelFormat'
+import type { PanoramaSource } from './panorama'
 import type { PresetView, ProjectionMode, TextureMode } from './utils'
 
 export type ModelInput = File | Blob | string
@@ -32,6 +33,12 @@ export interface RenderModelImageOptions {
    * @default png/webp 透明；jpeg `#ffffff`
    */
   background?: 'transparent' | string
+
+  /**
+   * 等距圆柱（2:1）全景图作为场景背景与环境光。
+   * 注意：全景会铺满整个画面，因此同时传 `background: 'transparent'` 也不会得到透明底。
+   */
+  panorama?: PanoramaSource
 
   /** 长边中心裁切为 1:1 @default false */
   square?: boolean
@@ -293,6 +300,10 @@ export async function renderModelImages(
 
     if (options.background !== undefined) {
       engine.setBackground(options.background)
+    }
+
+    if (options.panorama) {
+      await engine.setPanorama(options.panorama, { hideGrid: !options.showGrid })
     }
 
     applyEngineOptions(engine, options, format)

@@ -17,6 +17,10 @@ export interface ViewerCopy {
   back: string
   side: string
   top: string
+  sceneBackground: string
+  importPanorama: string
+  removePanorama: string
+  replacePanorama: string
   lighting: string
   angle: string
   keyIntensity: string
@@ -38,6 +42,8 @@ export interface ViewerCopy {
   toastLoadFail: string
   toastExportEmpty: string
   toastExportOk: string
+  toastPanoramaOk: string
+  toastPanoramaFail: string
   materialMissing: string
 }
 
@@ -58,6 +64,10 @@ const zhCN: ViewerCopy = {
   back: '背视',
   side: '侧视',
   top: '俯视',
+  sceneBackground: '场景背景',
+  importPanorama: '导入全景图',
+  removePanorama: '移除全景图',
+  replacePanorama: '替换全景图',
   lighting: '灯光设置',
   angle: '角度',
   keyIntensity: '射灯强度',
@@ -79,6 +89,8 @@ const zhCN: ViewerCopy = {
   toastLoadFail: '模型加载失败，请重试',
   toastExportEmpty: '暂无可导出的模型文件，请先导入',
   toastExportOk: '导出成功',
+  toastPanoramaOk: '全景图已应用',
+  toastPanoramaFail: '全景图加载失败，请换一张',
   materialMissing: '缺失'
 }
 
@@ -100,6 +112,10 @@ const enUS: ViewerCopy = {
   back: 'Back',
   side: 'Side',
   top: 'Top',
+  sceneBackground: 'Scene Backdrop',
+  importPanorama: 'Import panorama',
+  removePanorama: 'Remove panorama',
+  replacePanorama: 'Replace panorama',
   lighting: 'Lighting',
   angle: 'Angle',
   keyIntensity: 'Key Light',
@@ -122,6 +138,8 @@ const enUS: ViewerCopy = {
   toastLoadFail: 'Failed to load model',
   toastExportEmpty: 'No model to export yet',
   toastExportOk: 'Exported',
+  toastPanoramaOk: 'Panorama applied',
+  toastPanoramaFail: 'Failed to load panorama',
   materialMissing: 'missing'
 }
 

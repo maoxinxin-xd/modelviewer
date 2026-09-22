@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>720° 全景场景 check</title>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #111;
+      }
+      #app {
+        position: absolute;
+        inset: 0;
+      }
+      #hud {
+        position: fixed;
+        left: 12px;
+        bottom: 12px;
+        z-index: 9;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        font: 12px/1.5 -apple-system, 'PingFang SC', sans-serif;
+        color: #fff;
+      }
+      #hud button {
+        padding: 6px 10px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 8px;
+        background: rgba(20, 20, 20, 0.72);
+        color: #fff;
+        cursor: pointer;
+      }
+      #status {
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: rgba(20, 20, 20, 0.72);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud">
+      <button id="btnToggle">关闭全景</button>
+      <button id="btnRotateL">← 转 30°</button>
+      <button id="btnRotateR">转 30° →</button>
+      <button id="btnClay">白模</button>
+      <span id="status">初始化…</span>
+    </div>
+    <script type="module">
+      import { createModelViewer } from './src/index.ts'
+
+      const PANORAMA_URL = '/panoramas/garden-360.webp'
+      const MODEL_URL = '/actionvideo_unreal.glb'
+
+      const statusEl = document.getElementById('status')
+      const viewer = createModelViewer('#app', {
+        locale: 'zh-CN',
+        panorama: PANORAMA_URL,
+        src: MODEL_URL,
+        onReady: () => {
+          window.__ready = true
+        },
+        onLoadError: (error) => {
+          window.__error = String(error && error.message ? error.message : error)
+        }
+      })
+
+      window.__viewer = viewer
+
+      viewer.subscribe((state) => {
+        statusEl.textContent = [
+          state.hasPanorama ? 'panorama' : 'plain',
+          state.isLoading ? 'loading ' + Math.round(state.progress) + '%' : '',
+          state.hasModel ? state.fileName : 'no-model',
+          state.triangleCount ? state.triangleCount + ' tris' : ''
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      })
+
+      // 直接围绕模型转机位，用来检查全景图的接缝与地平线（测试页里访问引擎内部字段）
+      window.__look = (deg) => {
+        const engine = viewer.engine
+        const controls = engine.controls
+        const camera = engine.activeCamera
+        if (!controls || !camera) return false
+        const target = controls.target
+        const radius = camera.position.distanceTo(target)
+        const rad = (deg * Math.PI) / 180
+        camera.position.set(
+          target.x + Math.sin(rad) * radius,
+          target.y + radius * 0.08,
+          target.z + Math.cos(rad) * radius
+        )
+        camera.lookAt(target)
+        controls.update()
+        return true
+      }
+
+      let yaw = 0
+      const rotate = (delta) => {
+        yaw += delta
+        window.__look(yaw)
+      }
+
+      document.getElementById('btnRotateL').addEventListener('click', () => rotate(-30))
+      document.getElementById('btnRotateR').addEventListener('click', () => rotate(30))
+
+      let panoramaOn = true
+      const toggleBtn = document.getElementById('btnToggle')
+      toggleBtn.addEventListener('click', async () => {
+        panoramaOn = !panoramaOn
+        toggleBtn.textContent = panoramaOn ? '关闭全景' : '开启全景'
+        try {
+          await viewer.setPanorama(panoramaOn ? PANORAMA_URL : null)
+        } catch (error) {
+          panoramaOn = !panoramaOn
+          toggleBtn.textContent = panoramaOn ? '关闭全景' : '开启全景'
+          statusEl.textContent = '全景加载失败：' + (error && error.message ? error.message : error)
+        }
+      })
+
+      let clay = false
+      const clayBtn = document.getElementById('btnClay')
+      clayBtn.addEventListener('click', () => {
+        clay = !clay
+        viewer.setTextureMode(clay ? 'clay' : 'textured')
+        clayBtn.textContent = clay ? '贴图' : '白模'
+      })
+    </script>
+  </body>
+</html>

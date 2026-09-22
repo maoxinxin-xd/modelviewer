@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>全景离屏出图 check</title>
+    <style>
+      body {
+        margin: 0;
+        background: #222;
+        font: 13px/1.6 -apple-system, 'PingFang SC', sans-serif;
+        color: #fff;
+      }
+      #out {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        padding: 16px;
+      }
+      figure {
+        margin: 0;
+      }
+      img {
+        display: block;
+        width: 420px;
+        border-radius: 8px;
+      }
+      figcaption {
+        padding-top: 6px;
+        opacity: 0.75;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="out">渲染中…</div>
+    <script type="module">
+      import { renderModelImage } from './src/core/renderModelImage.ts'
+
+      const MODEL_URL = '/actionvideo_unreal.glb'
+      const PANORAMA_URL = '/panoramas/garden-360.webp'
+
+      const out = document.getElementById('out')
+      const cases = [
+        { title: '全景 + 默认背景参数（jpeg）', panorama: PANORAMA_URL, format: 'jpeg' },
+        { title: '全景 + 显式 background', panorama: PANORAMA_URL, format: 'jpeg', background: '#000000' },
+        { title: '无全景（png 透明底）', format: 'png' }
+      ]
+
+      try {
+        const results = []
+        for (const item of cases) {
+          const blob = await renderModelImage({
+            model: MODEL_URL,
+            width: 640,
+            height: 640,
+            square: true,
+            presetView: 'front',
+            panorama: item.panorama,
+            format: item.format,
+            background: item.background
+          })
+          results.push({ item, blob })
+        }
+        out.innerHTML = ''
+        for (const { item, blob } of results) {
+          const fig = document.createElement('figure')
+          const img = document.createElement('img')
+          img.src = URL.createObjectURL(blob)
+          const cap = document.createElement('figcaption')
+          cap.textContent = item.title + ' · ' + Math.round(blob.size / 1024) + 'KB'
+          fig.append(img, cap)
+          out.appendChild(fig)
+        }
+        window.__renderDone = true
+      } catch (error) {
+        window.__renderError = String(error && error.message ? error.message : error)
+        out.textContent = '失败：' + window.__renderError
+      }
+    </script>
+  </body>
+</html>

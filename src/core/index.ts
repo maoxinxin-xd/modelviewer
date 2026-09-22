@@ -1,13 +1,30 @@
 export { ViewerEngine } from './ViewerEngine'
-export type { ViewerState, ViewerEngineOptions } from './ViewerEngine'
+export type {
+  ViewerState,
+  ViewerEngineOptions,
+  ViewerFrameInfo,
+  ViewerFrameCallback,
+  ViewerRenderCallback,
+  ViewerCameraOptions,
+  ViewerCaptureFrameOptions,
+  ViewerFocusOptions
+} from './ViewerEngine'
 export { ModelLoader, isSupportedModelFile, isExperimentalModelFile, SUPPORTED_ACCEPT } from './ModelLoader'
-export type { LoadResult, ProgressCallback } from './ModelLoader'
+export type { LoadResult, ProgressCallback, ModelLoadOptions } from './ModelLoader'
 export {
   loadVrmlFromBuffer,
   loadStepFromBuffer,
   setStepWasmUrl,
   getStepWasmUrl
 } from './experimental'
+export { loadPanoramaTexture, applyPanorama } from './panorama'
+export type { PanoramaSource, PanoramaApplyOptions, AppliedPanorama } from './panorama'
+export { captureView, captureFormatMime } from './capture'
+export type { CaptureViewOptions, CaptureFormat } from './capture'
+export { computeFocusPose, focusCameraOn } from './camera'
+export type { FocusPose, FocusPoseOptions, FocusableControls } from './camera'
+export { loadModelObject } from './loadModel'
+export type { LoadModelObjectOptions } from './loadModel'
 export { createAssetPackFromZip } from './AssetPack'
 export type { AssetPack, VirtualFile } from './AssetPack'
 export { applyMaterialFallback, tryLoadMtlFromPack } from './MaterialResolver'
