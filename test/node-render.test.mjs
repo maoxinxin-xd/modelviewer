@@ -1,0 +1,30 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { Document } from '@gltf-transform/core';
+import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
+import sharp from 'sharp';
+import { createNodeIO } from '../node/load.mjs';
+import { renderModelImages } from '../node/index.mjs';
+
+test('native render: nonaligned dimensions and straight-alpha PNG', { skip: !process.env.MIVO_TEST_RENDER }, async () => {
+  const document = new Document(), buffer = document.createBuffer();
+  const positions = document.createAccessor().setType('VEC3').setArray(new Float32Array([-1,-1,0, 1,-1,0, 1,1,0, -1,1,0])).setBuffer(buffer);
+  const indices = document.createAccessor().setType('SCALAR').setArray(new Uint16Array([0,1,2, 2,3,0])).setBuffer(buffer);
+  const material = document.createMaterial().setBaseColorFactor([1,0,0,.5]).setAlphaMode('BLEND').setExtension('KHR_materials_unlit', document.createExtension(KHRMaterialsUnlit).createUnlit());
+  const primitive = document.createPrimitive().setAttribute('POSITION', positions).setIndices(indices).setMaterial(material);
+  document.createScene().addChild(document.createNode().setMesh(document.createMesh().addPrimitive(primitive)));
+  const source = { bytes: await (await createNodeIO()).writeBinary(document), fileName: 'red.glb' };
+  const result = await renderModelImages(source, { width: 65, height: 33 });
+  assert.ok(result.data.timings.renderMs > 0);
+  assert.ok(result.data.timings.totalMs >= result.data.timings.renderMs);
+  const image = sharp(result.outputs[0].bytes);
+  const meta = await image.metadata();
+  assert.equal(meta.width, 65); assert.equal(meta.height, 33);
+  const { data } = await image.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const center = (16 * 65 + 32) * 4;
+  assert.ok(data[center] > 200, `red channel was incorrectly premultiplied: ${data[center]}`);
+  assert.ok(data[center + 3] >= 126 && data[center + 3] <= 130);
+  assert.equal(data[3], 0);
+  assert.equal(typeof globalThis.document, 'undefined');
+  assert.equal(globalThis.navigator?.gpu, undefined);
+});
