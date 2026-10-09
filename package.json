@@ -1,7 +1,7 @@
 {
   "name": "mivo-model-viewer",
-  "version": "0.4.0",
-  "description": "Multi-format browser 3D model viewer SDK — default UI or headless engine, easy to embed in any frontend page.",
+  "version": "0.5.0",
+  "description": "Browser 3D viewer SDK and pure Node model processing CLI: inspect, render, convert and optimize.",
   "type": "module",
   "license": "MIT",
   "keywords": [
@@ -19,7 +19,10 @@
   ],
   "files": [
     "dist",
-    "README.md"
+    "node",
+    "README.md",
+    "docs/cli-design.md",
+    "Dockerfile.node"
   ],
   "sideEffects": false,
   "main": "./dist/mivo-model-viewer.js",
@@ -34,7 +37,11 @@
       "types": "./dist/core/index.d.ts",
       "import": "./dist/mivo-model-viewer-core.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./node": {
+      "types": "./node/index.d.ts",
+      "import": "./node/index.mjs"
+    }
   },
   "scripts": {
     "dev": "vite",
@@ -44,11 +51,13 @@
     "build:pages": "tsc --noEmit && vite build --base=/modelviewer/",
     "build": "npm run typecheck && npm run build:lib",
     "preview": "vite preview",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test:node": "node --test test/node-*.test.mjs",
+    "cli": "node node/cli.mjs"
   },
   "peerDependencies": {
-    "three": ">=0.150.0",
-    "occt-import-js": ">=0.0.23"
+    "occt-import-js": ">=0.0.23",
+    "three": ">=0.170.0"
   },
   "peerDependenciesMeta": {
     "occt-import-js": {
@@ -56,16 +65,31 @@
     }
   },
   "dependencies": {
-    "fflate": "^0.8.3"
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
+    "@napi-rs/canvas": "1.0.10",
+    "commander": "15.0.0",
+    "draco3dgltf": "1.5.7",
+    "fflate": "^0.8.3",
+    "linkedom": "0.18.13",
+    "meshoptimizer": "1.2.0",
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "@types/three": "^0.170.0",
-    "occt-import-js": "^0.0.23",
     "three": "^0.170.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.12.0"
+  },
+  "bin": {
+    "mivo-model-viewer": "./node/cli.mjs"
+  },
+  "optionalDependencies": {
+    "webgpu": "0.6.2",
+    "occt-import-js": "0.0.23"
   }
 }

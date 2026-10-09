@@ -1,0 +1,20 @@
+# Pure Node CPU rendering: no Chromium, X server or hardware GPU device needed.
+FROM node:22-trixie-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+ENV NODE_ENV=production MIVO_GPU_BACKEND=vulkan
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+# Three remains a peer of the browser SDK, but the CLI requires its loaders and WebGPU renderer.
+RUN npm install --no-save --ignore-scripts three@0.170.0
+COPY node ./node
+# Choose the actual Lavapipe ICD filename (Mesa versions differ on arch suffix).
+RUN printf '#!/bin/sh\nset -eu\nicd=$(find /usr/share/vulkan/icd.d -name "lvp_icd*.json" | head -n 1)\nif [ -z "$icd" ]; then echo "Lavapipe Vulkan ICD not installed" >&2; exit 1; fi\nexport VK_DRIVER_FILES="$icd" VK_ICD_FILENAMES="$icd"\nexec node /app/node/cli.mjs "$@"\n' > /usr/local/bin/mivo-node \
+ && chmod +x /usr/local/bin/mivo-node \
+ && mkdir -p /data /output \
+ && chown -R node:node /output
+USER node
+ENTRYPOINT ["mivo-node"]
+CMD ["--help"]

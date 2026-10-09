@@ -514,3 +514,52 @@ npm publish
 ## License
 
 MIT
+
+
+---
+
+## Node 后端工具 / CLI
+
+Node **≥22.12**，Three **≥0.170**。无需浏览器，支持信息读取、图片渲染、转 GLB 和减面优化。
+
+```bash
+# 在本仓库可直接运行，无需构建
+node node/cli.mjs info ./model.glb --json
+node node/cli.mjs render ./model.glb -o ./preview.png
+node node/cli.mjs convert ./model.fbx -o ./model.glb
+node node/cli.mjs optimize ./model.glb -o ./model-small.glb
+node node/cli.mjs convert ./model.fbx -o ./model-small.glb --optimize
+
+# 减面与误差覆盖
+node node/cli.mjs convert ./model.fbx -o ./model-small.glb --optimize \
+  --simplify-ratio 0.5 --simplify-error 0.001 --texture-size 2048
+```
+
+npm 安装本版本后，可用 `mivo-model-viewer` 替代 `node node/cli.mjs`。不覆盖已有产物，需覆盖时显式传 `--overwrite`。`--json` 输出机器可读结果；日志走 stderr。
+
+后端直接调用（模型任务在隔离 Node 子进程中执行）：
+
+```js
+import { createModelProcessor } from 'mivo-model-viewer/node'
+import { writeFile } from 'node:fs/promises'
+
+const processor = createModelProcessor({ concurrency: 1, maxQueue: 32 })
+try {
+  const result = await processor.convertModelToGlb('/data/model.fbx', {
+    optimize: true,
+    simplifyRatio: 0.5,
+    timeout: 120
+  })
+  await writeFile('/data/model-small.glb', result.outputs[0].bytes)
+} finally {
+  processor.close()
+}
+```
+
+普通转换保真优先；`--optimize` 沿用 glTF Transform 4.5.1 完整优化默认值，可能改变节点层级与模型细节。默认减面目标比例 0、误差 0.0001，表示在误差约束内尽量简化，不保证固定保留比例。
+
+**渲染依赖**：Node Dawn/WebGPU + Three.js，macOS 使用 Metal；Linux 无 GPU 使用 Mesa Lavapipe 软件 Vulkan，需要系统 `libvulkan1`、`mesa-vulkan-drivers`。提供 `Dockerfile.node`，不使用 Chromium、Python 或 Blender。info/GLB 转换/优化不初始化图形设备。
+
+详见 [CLI 设计与部署说明](docs/cli-design.md)。测试使用 `npm run test:node`，不包含 SDK 构建或类型检查。
+
+Node CLI/API 的结果自动提供 `data.timings`（毫秒）：模型加载与转换、GLB 导出、完整优化、纯减面、渲染、排队及任务总时间；CLI 另有文件写入和命令总时间。优化各阶段明细位于 `data.optimization.stageTimingsMs`。字段口径及独立基准测量说明见 `docs/cli-design.md`。
