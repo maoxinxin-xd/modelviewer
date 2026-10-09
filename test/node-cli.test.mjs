@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, readdir, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, readdir, rm, mkdir, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -288,4 +288,15 @@ test('CLI output failure preserves API timings and reports incomplete write elap
   assert.equal(e.details.timings.totalMs, 12);
   assert.equal(e.details.timings.outputWriteMs, null);
   assert.ok(e.details.timings.outputWriteElapsedMs >= 0);
+});
+
+
+test('installed-style CLI symlink executes the command entrypoint', async t => {
+  const dir = await scratch(t);
+  const bin = path.join(dir, 'mivo-model-viewer');
+  await symlink(cli, bin);
+  const result = spawnSync(process.execPath, [bin, '--version'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(result.stdout.trim(), pkg.version);
 });

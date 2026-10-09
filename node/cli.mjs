@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { performance } from 'node:perf_hooks';
 import { Command } from 'commander';
-import { readFile, lstat, stat, mkdir, open, link, unlink, rename } from 'node:fs/promises';
+import { readFile, lstat, stat, mkdir, open, link, unlink, rename, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -215,6 +215,8 @@ export async function runCli(argv = process.argv, { stdout = process.stdout, std
   } finally { clearTimeout(deadline); process.removeListener('SIGINT', sigint); }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+// npm bin shims/symlinks and macOS /tmp aliases must resolve to the same file.
+const invokedPath = process.argv[1] ? await realpath(process.argv[1]).catch(() => null) : null;
+if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
   process.exitCode = await runCli();
 }
