@@ -24,8 +24,15 @@ function fakeWorker({ failSpawn = false, stderr = '' } = {}) {
 }
 function replaceFork(t, implementation) {
   const original = childProcess.fork;
+  const originalKill = process.kill;
+  process.kill = (pid, signal) => {
+    if (pid === -12345) throw Object.assign(new Error('No mock group'), { code: 'ESRCH' });
+    return originalKill(pid, signal);
+  };
   childProcess.fork = implementation; syncBuiltinESMExports();
-  t.after(() => { childProcess.fork = original; syncBuiltinESMExports(); });
+  t.after(() => {
+    process.kill = originalKill; childProcess.fork = original; syncBuiltinESMExports();
+  });
 }
 test('failed fork releases queue slot for the next task', async t => {
   let calls = 0;
@@ -55,4 +62,86 @@ test('cancellation before worker starts records zero execution and nonnegative q
     return true;
   });
   await active;
+});
+
+
+test('already-aborted signals preserve timeout/cancellation codes without spawning', async t => {
+  let forks = 0;
+  replaceFork(t, () => { forks++; return fakeWorker(); });
+  const processor = createModelProcessor();
+  t.after(() => processor.close());
+  for (const code of ['TIMEOUT', 'ABORTED', undefined]) {
+    const controller = new AbortController();
+    controller.abort(code ? Object.assign(new Error('Stopped'), { code }) : undefined);
+    await assert.rejects(
+      processor.inspectModel('example.glb', { signal: controller.signal }),
+      { code: code === 'TIMEOUT' ? 'TIMEOUT' : 'ABORTED' },
+    );
+  }
+  assert.equal(forks, 0);
+  assert.equal((await processor.inspectModel('example.glb')).ok, true);
+});
+
+test('queued timeout signals retain TIMEOUT and zero execution time', async t => {
+  replaceFork(t, () => fakeWorker());
+  const processor = createModelProcessor();
+  t.after(() => processor.close());
+  const active = processor.inspectModel('example.glb');
+  const controller = new AbortController();
+  const queued = processor.inspectModel('example.glb', { signal: controller.signal });
+  controller.abort(Object.assign(new Error('Deadline exceeded'), { code: 'TIMEOUT' }));
+  await assert.rejects(queued, e => {
+    assert.equal(e.code, 'TIMEOUT');
+    assert.equal(e.details.timings.executionMs, 0);
+    return true;
+  });
+  await active;
+});
+
+test('cleanup failure quarantines the processor and rejects close', async t => {
+  const { rm } = await import('node:fs/promises');
+  let workspace, calls = 0;
+  replaceFork(t, () => {
+    calls++;
+    const child = fakeWorker();
+    const send = child.send;
+    child.send = message => { workspace = message.directory; send(message); };
+    return child;
+  });
+  const wrappedKill = process.kill;
+  process.kill = (pid, signal) => {
+    if (pid === -12345) throw Object.assign(new Error('Permission denied'), { code: 'EPERM' });
+    return wrappedKill(pid, signal);
+  };
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  const processor = createModelProcessor();
+  const active = processor.inspectModel('example.glb');
+  const queued = processor.inspectModel('queued.glb');
+  await Promise.all([
+    assert.rejects(active, { code: 'WORKER_CLEANUP_FAILED' }),
+    assert.rejects(queued, { code: 'WORKER_CLEANUP_FAILED' }),
+  ]);
+  assert.equal(calls, 1, 'A queued worker started despite incomplete cleanup');
+  await assert.rejects(processor.inspectModel('next.glb'), { code: 'WORKER_CLEANUP_FAILED' });
+  await assert.rejects(processor.close(), { code: 'WORKER_CLEANUP_FAILED' });
+});
+
+test('transient EPERM group probes wait for confirmed process-group exit', async t => {
+  replaceFork(t, () => fakeWorker());
+  const original = process.kill;
+  let probes = 0;
+  process.kill = (pid, signal) => {
+    if (pid === -12345) {
+      if (signal === 'SIGKILL') return true;
+      if (++probes <= 2) {
+        throw Object.assign(new Error('Reaping orphan'), { code: 'EPERM' });
+      }
+    }
+    return original(pid, signal);
+  };
+  const processor = createModelProcessor();
+  t.after(() => processor.close());
+  assert.equal((await processor.inspectModel('example.glb')).ok, true);
+  assert.equal(probes, 3);
+  await processor.close();
 });

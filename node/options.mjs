@@ -1,7 +1,8 @@
 import path from 'node:path';
+import { MODEL_FORMATS } from './formats.mjs';
 
 export const OPTIMIZATION_KEYS = Object.freeze(['ratio', 'error', 'textures', 'compress', 'textureCompress', 'instance', 'palette', 'flatten', 'join', 'weld', 'simplify', 'simplifyRatio', 'simplifyError', 'simplifyLockBorder', 'textureSize']);
-const views = ['front', 'back', 'side', 'top', 'none'];
+const views = ['front', 'back', 'left', 'right', 'side', 'top', 'bottom', 'none'];
 function invalid(message) { throw Object.assign(new Error(message), { code: 'INVALID_ARGUMENT' }); }
 function number(value, fallback, key, min, max = Infinity, integer = false) {
   const selected = value === undefined ? fallback : value;
@@ -36,11 +37,29 @@ export function validateOptions(command, opts = {}) {
   o.resourceDirs = dirs.map(d => path.resolve(d));
   delete o.resourceDir;
   if (opts.entry !== undefined && (typeof opts.entry !== 'string' || !opts.entry.trim())) invalid('entry must be a nonempty archive entry');
+  if (opts.entryFormats !== undefined) {
+    const formats = opts.entryFormats;
+    if (!Array.isArray(formats) || !formats.length ||
+      formats.some(format => !MODEL_FORMATS.includes(format)) ||
+      new Set(formats).size !== formats.length) {
+      invalid('entryFormats must contain unique supported model extensions');
+    }
+    o.entryFormats = [...formats];
+  }
+  if (opts.entryDepth !== undefined) {
+    o.entryDepth = number(opts.entryDepth, undefined, 'entryDepth', 0, Infinity, true);
+  }
   if (opts.input !== undefined) {
     if (typeof opts.input !== 'string' || !opts.input.trim()) invalid('input must be a nonempty path');
     o.input = path.resolve(opts.input);
   }
   if (opts.onProgress !== undefined && typeof opts.onProgress !== 'function') invalid('onProgress must be a function');
+  o.fbxBackend = choice(opts.fbxBackend, 'native', 'fbxBackend', ['native', 'three']);
+  if (opts.fbxBinary !== undefined) {
+    if (typeof opts.fbxBinary !== 'string' || !opts.fbxBinary.trim() ||
+        opts.fbxBinary.includes('\0')) invalid('fbxBinary must be a nonempty executable path');
+    o.fbxBinary = path.resolve(opts.fbxBinary);
+  }
   const optimizationRequested = OPTIMIZATION_KEYS.some(k => opts[k] !== undefined);
   if (command === 'convert') {
     o.optimize = boolean(opts.optimize, false, 'optimize');
@@ -68,13 +87,18 @@ export function validateOptions(command, opts = {}) {
     o.width = number(opts.width, opts.height ?? o.size, 'width', 1, 8192, true);
     o.height = number(opts.height, opts.width ?? o.size, 'height', 1, 8192, true);
     if (o.width * o.height > 16777216) invalid('Total image pixels must not exceed 16777216');
+    o.device = choice(opts.device, 'auto', 'device', ['auto', 'software', 'hardware']);
+    o.padding = number(opts.padding, 0.1, 'padding', 0, 10);
     o.dpr = number(opts.dpr, 1, 'dpr', 1, 1);
     o.viewExplicit = boolean(opts.viewExplicit, opts.view !== undefined || opts.presetView !== undefined, 'viewExplicit');
     o.view = choice(opts.view ?? opts.presetView, 'front', 'view', views);
     o.presetView = o.view;
     if (opts.views !== undefined) {
       o.views = typeof opts.views === 'string' ? opts.views.split(',').map(v => v.trim()) : opts.views;
-      if (!Array.isArray(o.views) || !o.views.length || o.views.some(v => !views.includes(v)) || new Set(o.views).size !== o.views.length) invalid('views must be a nonempty list of unique front/back/side/top/none values');
+      if (!Array.isArray(o.views) || !o.views.length ||
+        o.views.some(v => !views.includes(v)) || new Set(o.views).size !== o.views.length) {
+        invalid('views must contain unique supported view names');
+      }
       if (o.viewExplicit) invalid('Use view or views, not both');
     }
     o.background = opts.background ?? (o.format === 'jpeg' ? '#ffffff' : 'transparent');
@@ -82,7 +106,9 @@ export function validateOptions(command, opts = {}) {
     if (o.format === 'jpeg' && o.background === 'transparent') invalid('JPEG does not support a transparent background');
     o.grid = boolean(opts.grid ?? opts.showGrid, false, 'grid');
     o.showGrid = o.grid;
-    o.textureMode = choice(opts.textureMode, 'textured', 'textureMode', ['textured', 'clay', 'normal', 'albedo']);
+    o.textureMode = choice(opts.textureMode, 'textured', 'textureMode', [
+      'textured', 'clay', 'white', 'normal', 'albedo',
+    ]);
     o.projection = choice(opts.projection, 'perspective', 'projection', ['perspective', 'orthographic']);
     if (opts.quality !== undefined && o.format === 'png') invalid('quality is only supported for JPEG/WebP');
     if (o.format !== 'png') o.quality = number(opts.quality, 0.92, 'quality', 0, 1);

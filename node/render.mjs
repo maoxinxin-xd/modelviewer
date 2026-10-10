@@ -7,7 +7,7 @@ export async function renderDocument(document, options = {}, context = {}) {
   const width = options.width ?? 1024;
   const height = options.height ?? width;
   const format = options.format ?? 'png';
-  const gpu = await createRenderer(width, height);
+  const gpu = await createRenderer(width, height, options);
   const { THREE: T, renderer } = gpu;
   let loaded;
   const warnings = [];
@@ -47,7 +47,10 @@ export async function renderDocument(document, options = {}, context = {}) {
         let material;
         if (mode === 'normal') material = new T.MeshNormalMaterial({ side: original.side });
         else if (mode === 'albedo') material = new T.MeshBasicMaterial({ color: original.color ?? 0xffffff, map: original.map ?? null, vertexColors: original.vertexColors, side: original.side, transparent: original.transparent, opacity: original.opacity, alphaTest: original.alphaTest, alphaMap: original.alphaMap });
-        else material = new T.MeshStandardMaterial({ color: 0xc7c7c7, roughness: 0.8, metalness: 0, side: original.side });
+        else material = new T.MeshStandardMaterial({
+          color: mode === 'white' ? 0xffffff : 0xc7c7c7,
+          roughness: 0.8, metalness: 0, side: original.side,
+        });
         temporaryMaterials.add(material);
         return material;
       };
@@ -70,7 +73,13 @@ export async function renderDocument(document, options = {}, context = {}) {
     }
     const background = options.background ?? (format === 'jpeg' ? '#ffffff' : 'transparent');
     renderer.setClearColor(background === 'transparent' ? 0 : new T.Color(background), background === 'transparent' ? 0 : 1);
+    const size = box.getSize(new T.Vector3());
+    const padding = options.padding ?? 0.1;
+    // One scale for every axis-aligned view, including portrait/landscape output.
     const views = options.views ?? [options.view ?? 'front'];
+    const axisExtent = Math.max(size.x, size.y, size.z, 0.0001) / 2;
+    // Oblique views need the bounding sphere to avoid clipping rotated corners.
+    const halfExtent = (views.includes('none') ? radius : axisExtent) * (1 + padding);
     const outputs = [];
     for (const view of views) {
       context.log?.(`Rendering ${view} (${width}×${height})`);
@@ -80,17 +89,29 @@ export async function renderDocument(document, options = {}, context = {}) {
       let camera;
       let distance;
       if (options.projection === 'orthographic') {
-        const span = radius * 1.15;
-        camera = new T.OrthographicCamera(-span * Math.max(aspect, 1), span * Math.max(aspect, 1), span / Math.min(aspect, 1), -span / Math.min(aspect, 1), near, far);
+        const horizontal = halfExtent * Math.max(aspect, 1);
+        const vertical = halfExtent / Math.min(aspect, 1);
+        camera = new T.OrthographicCamera(
+          -horizontal, horizontal, vertical, -vertical, near, far,
+        );
         distance = radius * 4;
       } else {
         camera = new T.PerspectiveCamera(45, aspect, near, far);
-        distance = Math.max(radius / Math.sin(Math.PI / 8), radius / Math.sin(Math.atan(Math.tan(Math.PI / 8) * aspect))) * 1.15;
+        const verticalDistance = radius / Math.sin(Math.PI / 8);
+        const horizontalDistance = radius / Math.sin(Math.atan(Math.tan(Math.PI / 8) * aspect));
+        distance = Math.max(verticalDistance, horizontalDistance) * (1 + padding);
       }
-      const directions = { front: [0, 0, 1], back: [0, 0, -1], side: [1, 0, 0], top: [0, 1, 0], none: [1, 0.65, 1] };
+      const directions = {
+        front: [0, 0, 1], back: [0, 0, -1],
+        left: [-1, 0, 0], right: [1, 0, 0], side: [1, 0, 0],
+        top: [0, 1, 0], bottom: [0, -1, 0], none: [1, 0.65, 1],
+      };
+      camera.far = Math.max(far, distance + radius * 2);
+      camera.updateProjectionMatrix();
       const direction = new T.Vector3(...directions[view]).normalize();
       camera.position.copy(center).add(direction.multiplyScalar(distance));
       if (view === 'top') camera.up.set(0, 0, -1);
+      if (view === 'bottom') camera.up.set(0, 0, 1);
       camera.lookAt(center); camera.updateMatrixWorld(true);
       const rgba = await gpu.render(scene, camera);
       if (background === 'transparent') unpremultiplySRGB(rgba);
@@ -100,7 +121,15 @@ export async function renderDocument(document, options = {}, context = {}) {
       const bytes = await image.toFormat(format, format === 'png' ? {} : { quality: Math.max(1, Math.round((options.quality ?? 0.92) * 100)) }).toBuffer();
       outputs.push({ name: `model-${view}.${format === 'jpeg' ? 'jpg' : format}`, format, bytes, view, width, height });
     }
-    return { outputs, warnings, data: { renderer: 'three-webgpu/dawn', backend: gpu.backend, adapter: gpu.adapter, width, height, views } };
+    return {
+      outputs, warnings,
+      data: {
+        renderer: 'three-webgpu/dawn', backend: gpu.backend, adapter: gpu.adapter,
+        device: gpu.deviceType, requestedDevice: gpu.requestedDevice,
+        projection: options.projection ?? 'perspective', padding,
+        width, height, views,
+      },
+    };
   } finally {
     for (const material of temporaryMaterials) material.dispose();
     for (const texture of dataTextures) texture.dispose();

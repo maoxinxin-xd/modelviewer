@@ -13,7 +13,12 @@ function taskOptions(c) {
   return c.option('--json', 'Print exactly one JSON result')
     .option('--timeout <seconds>', 'Task timeout in seconds (default: 120)')
     .option('--resource-dir <path>', 'Additional resource directory (repeatable)', (v, old = []) => [...old, v])
+    .option('--fbx-backend <backend>', 'native (default) or three')
+    .option('--fbx-binary <path>', 'Explicit native FBX executable (no PATH fallback)')
     .option('--entry <path>', 'Model entry inside ZIP input')
+    .option('--entry-formats <formats>', 'Preferred archive formats, comma-separated',
+      value => value.split(',').map(format => format.trim()))
+    .option('--entry-depth <levels>', 'Maximum archive entry search depth', Number)
     .option('--strict', 'Treat applicable backend warnings as errors')
     .option('--allow-network', 'Allow network resources')
     .option('--overwrite', 'Explicitly allow replacing output files');
@@ -160,6 +165,7 @@ export async function runCli(argv = process.argv, { stdout = process.stdout, std
       await preflightOutputs(paths, opts.overwrite);
       if (controller.signal.aborted) throw controller.signal.reason;
       const api = await loadApi();
+      if (controller.signal.aborted) throw controller.signal.reason;
       const { inspectModel, renderModelImages, convertModelToGlb, optimizeModel } = api;
       const fn = { info: inspectModel, render: renderModelImages, convert: convertModelToGlb, optimize: optimizeModel }[name];
       if (typeof fn !== 'function') throw coded('API_UNAVAILABLE', `API for ${name} is unavailable`);
@@ -179,14 +185,39 @@ export async function runCli(argv = process.argv, { stdout = process.stdout, std
       emit({ ...result, data: { ...result.data, timings }, outputs });
     };
   }
+  taskOptions(program.command('doctor')).action(async (raw, c) => {
+    command = 'doctor';
+    const supplied = explicitOptions(c);
+    json ||= Boolean(supplied.json);
+    const opts = validateOptions('info', supplied);
+    // Probe without loading the scheduler, GPU, adapters or optional webgpu package.
+    const { probeFbxBinary } = await import('./native-fbx.mjs');
+    const probe = await probeFbxBinary({
+      ...opts, isolated: true, signal: controller.signal,
+    });
+    const warnings = probe.requiresRosetta ? [{
+      code: 'FBX_ROSETTA_REQUIRED', affectsFidelity: false,
+      message: 'Darwin arm64 uses the x64 FBX binary and requires Rosetta 2.',
+    }] : [];
+    emit({
+      schemaVersion: 1, ok: probe.ok, command, outputs: [],
+      data: { fbx: probe }, warnings, error: probe.error,
+    });
+    if (!probe.ok) throw coded(probe.error.code, probe.error.message);
+  });
   taskOptions(program.command('info').argument('<input>', 'Input model path')).action(action('info'));
   const render = taskOptions(program.command('render').argument('<input>', 'Input model path'));
   render.option('-o, --output <path>', 'Single image destination').option('--output-dir <path>', 'Multi-view image directory')
-    .option('--views <views>', 'Comma-separated unique views; requires --output-dir').option('--view <view>', 'front, back, side, top, or none')
+    .option('--views <views>', 'Comma-separated unique views; requires --output-dir')
+    .option('--view <view>', 'front, back, left, right, top, bottom, none; side aliases right')
+    .option('--device <device>', 'auto, software, or hardware (default: auto)')
+    .option('--padding <ratio>', 'Camera framing padding (default: 0.1)', Number)
     .option('--format <format>', 'png, jpg/jpeg, or webp').option('--size <pixels>', 'Square image size (default: 1024)')
     .option('--width <pixels>', 'Image width').option('--height <pixels>', 'Image height').option('--dpr <ratio>', 'Device pixel ratio (default: 1)')
     .option('--background <color>', 'Color or transparent').option('--grid', 'Show grid').option('--no-grid', 'Hide grid')
-    .option('--texture-mode <mode>', 'textured, clay, normal, or albedo').option('--mode <mode>', 'Alias for --texture-mode').option('--projection <mode>', 'perspective or orthographic')
+    .option('--texture-mode <mode>', 'textured, white, clay, normal, or albedo')
+    .option('--mode <mode>', 'Alias for --texture-mode')
+    .option('--projection <mode>', 'perspective or orthographic')
     .option('--quality <value>', 'JPEG/WebP quality (default: 0.92)').option('--light-intensity <value>', 'Main light intensity (default: 2)')
     .option('--ambient-intensity <value>', 'Ambient intensity (default: 2)').option('--angle <degrees>', 'Light angle (default: 0)').option('--light-angle <degrees>', 'Alias for --angle')
     .action(action('render'));
@@ -208,7 +239,10 @@ export async function runCli(argv = process.argv, { stdout = process.stdout, std
       e.details = { ...(e.details || {}), timings: { unit: 'ms', ...(apiTimings || {}), ...(e.details?.timings || {}), outputWriteMs: null, ...(writeStarted !== null ? { outputWriteElapsedMs: endedAt - writeStarted } : {}), cliTotalMs: endedAt - cliStarted } };
     }
     const parseError = e.code?.startsWith('commander.');
-    if (command === null && ['info', 'render', 'convert', 'optimize'].includes(program.args[0])) command = program.args[0];
+    if (command === null &&
+        ['info', 'render', 'convert', 'optimize', 'doctor'].includes(program.args[0])) {
+      command = program.args[0];
+    }
     const code = interrupted ? 'ABORTED' : parseError ? 'INVALID_ARGUMENT' : e.code ?? 'INTERNAL_ERROR';
     emit({ schemaVersion: 1, ok: false, command, input, entry, outputs: e.outputs ?? [], data: null, warnings: e.details?.warnings ?? e.warnings ?? [], error: { code, message: interrupted ? 'Interrupted' : e.message, ...(e.details ? { details: e.details } : {}) } });
     return interrupted || code === 'ABORTED' ? 130 : parseError || code === 'INVALID_ARGUMENT' ? 2 : 1;

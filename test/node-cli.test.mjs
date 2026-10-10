@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateOptions } from '../node/options.mjs';
 import { runCli, outputPaths, preflightOutputs, writeOutputs } from '../node/cli.mjs';
+import { createModelProcessor } from '../node/index.mjs';
 
 const cli = fileURLToPath(new URL('../node/cli.mjs', import.meta.url));
 const argv = (...args) => ['node', cli, ...args];
@@ -51,6 +52,7 @@ test('render defaults, formats, aliases, multiple views and idempotence', () => 
   assert.equal(opts.size, 1024); assert.equal(opts.width, 1024); assert.equal(opts.height, 1024);
   assert.equal(opts.dpr, 1); assert.equal(opts.background, 'transparent'); assert.equal(opts.grid, false);
   assert.equal(opts.textureMode, 'textured'); assert.equal(opts.projection, 'perspective');
+  assert.equal(opts.device, 'auto'); assert.equal(opts.padding, 0.1);
   assert.equal(opts.lightIntensity, 2); assert.equal(opts.ambientIntensity, 2); assert.equal(opts.angle, 0);
   assert.equal(opts.view, 'front'); assert.equal(opts.quality, undefined);
   assert.equal(validateOptions('render', { format: 'jpg' }).background, '#ffffff');
@@ -69,7 +71,8 @@ test('validation rejects malformed numbers, modes, booleans, archives and views'
     ['render', { size: 2.5 }], ['render', { dpr: 0 }], ['render', { width: Infinity }],
     ['render', { format: 'gif' }], ['render', { quality: 0.9 }],
     ['render', { format: 'jpeg', quality: 1.1 }], ['render', { format: 'jpeg', background: 'transparent' }],
-    ['render', { views: 'front,front' }], ['render', { views: [] }], ['render', { views: 'left' }],
+    ['render', { views: 'front,front' }], ['render', { views: [] }],
+    ['render', { views: 'diagonal' }],
     ['render', { views: 'front,back', view: 'front' }], ['render', { lightIntensity: -1 }],
     ['optimize', { ratio: -1 }], ['optimize', { error: 2 }], ['optimize', { textures: 0 }],
     ['optimize', { textures: 16385 }], ['optimize', { compress: 'zip' }],
@@ -299,4 +302,123 @@ test('installed-style CLI symlink executes the command entrypoint', async t => {
   assert.equal(result.status, 0, result.stderr);
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(result.stdout.trim(), pkg.version);
+});
+
+
+test('CLI preserves timeout exit 1 when the signal aborts before API enqueue', async t => {
+  const processor = createModelProcessor();
+  t.after(() => processor.close());
+  const r = await invoke(['info', 'model.glb', '--json', '--timeout', '0.01'], {
+    inspectModel: async (input, opts) => {
+      await new Promise(resolve => opts.signal.addEventListener('abort', resolve, { once: true }));
+      assert.equal(opts.signal.reason.code, 'TIMEOUT');
+      return processor.inspectModel(input, opts);
+    },
+  });
+  assert.equal(r.code, 1);
+  assert.equal(JSON.parse(r.out).error.code, 'TIMEOUT');
+});
+
+test('CLI does not invoke the API when loading it exceeds the deadline', async () => {
+  let out = '', calls = 0;
+  const code = await runCli(argv('info', 'model.glb', '--json', '--timeout', '0.01'), {
+    stdout: { write: text => { out += text; } },
+    stderr: { write() {} },
+    loadApi: async () => {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      return { inspectModel: async () => { calls++; return envelope('info', 'model.glb'); } };
+    },
+  });
+  assert.equal(code, 1);
+  assert.equal(calls, 0);
+  assert.equal(JSON.parse(out).error.code, 'TIMEOUT');
+});
+
+test('API cancellation without SIGINT returns exit 130', async () => {
+  const r = await invoke(['info', 'model.glb', '--json'], {
+    inspectModel: async () => { throw Object.assign(new Error('Cancelled'), { code: 'ABORTED' }); },
+  });
+  assert.equal(r.code, 130);
+  assert.equal(JSON.parse(r.out).error.code, 'ABORTED');
+});
+
+test('archive search CLI options are available on every existing command', async t => {
+  const dir = await scratch(t);
+  const methods = {
+    info: 'inspectModel', render: 'renderModelImages',
+    convert: 'convertModelToGlb', optimize: 'optimizeModel',
+  };
+  for (const [command, method] of Object.entries(methods)) {
+    const outputs = command === 'info' ? [] : command === 'render' ? [image()] : [{
+      name: 'model.glb', format: 'glb', bytes: Buffer.from([1]),
+    }];
+    const args = [command, 'archive.zip', '--entry-formats', 'glb, obj', '--entry-depth', '3'];
+    if (command !== 'info') {
+      args.push('-o', path.join(dir, `${command}.${command === 'render' ? 'png' : 'glb'}`));
+    }
+    args.push('--json');
+    const r = await invoke(args, {
+      [method]: async (input, opts) => {
+        assert.deepEqual(opts.entryFormats, ['glb', 'obj']);
+        assert.equal(opts.entryDepth, 3);
+        return envelope(command, input, outputs);
+      },
+    });
+    assert.equal(r.code, 0, r.out);
+  }
+});
+
+test('render CLI forwards device, numeric padding, new views and white texture mode', async t => {
+  const dir = await scratch(t);
+  for (const [device, view] of [['auto', 'left'], ['software', 'right'], ['hardware', 'bottom']]) {
+    const r = await invoke([
+      'render', 'model.glb', '-o', path.join(dir, `${view}.png`), '--json',
+      '--device', device, '--padding', '0.2', '--view', view, '--texture-mode', 'white',
+    ], {
+      renderModelImages: async (input, opts) => {
+        assert.equal(opts.device, device);
+        assert.equal(opts.padding, 0.2);
+        assert.equal(opts.view, view);
+        assert.equal(opts.textureMode, 'white');
+        return envelope('render', input, [image(view)]);
+      },
+    });
+    assert.equal(r.code, 0, r.out);
+  }
+});
+
+test('render retains side compatibility and supports new multi-view output names', async t => {
+  const dir = await scratch(t);
+  assert.equal(validateOptions('render', { view: 'side' }).view, 'side');
+  const views = ['left', 'right', 'bottom'];
+  const r = await invoke([
+    'render', 'model.glb', '--output-dir', dir, '--views', views.join(','), '--json',
+  ], {
+    renderModelImages: async (input, opts) => {
+      assert.deepEqual(opts.views, views);
+      return envelope('render', input, views.map(view => image(view)));
+    },
+  });
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual((await readdir(dir)).sort(), views.map(view => `model-${view}.png`).sort());
+});
+
+test('CLI compression choices match the shared API normalization', async t => {
+  const dir = await scratch(t);
+  for (const compress of ['meshopt', 'draco', 'quantize', 'none', 'false']) {
+    const expected = ['none', 'false'].includes(compress) ? false : compress;
+    assert.equal(validateOptions('optimize', { compress }).compress, expected);
+    const r = await invoke([
+      'optimize', 'model.glb', '-o', path.join(dir, `${compress}.glb`),
+      '--compress', compress, '--json',
+    ], {
+      optimizeModel: async (input, opts) => {
+        assert.equal(opts.compress, expected);
+        return envelope('optimize', input, [{
+          name: 'model.glb', format: 'glb', bytes: Buffer.from([1]),
+        }]);
+      },
+    });
+    assert.equal(r.code, 0, r.out);
+  }
 });

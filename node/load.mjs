@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { MODEL_FORMATS } from './formats.mjs';
+import { convertNativeFbx } from './native-fbx.mjs';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
@@ -8,7 +10,7 @@ import draco3d from 'draco3dgltf';
 import { ResourceResolver, ZipIndex, validateFBXArrays, diagnostic, limitsFor, normalizeName, resourceError } from './resources.mjs';
 
 const require = createRequire(import.meta.url);
-const MODEL_FORMATS = ['glb', 'gltf', 'fbx', 'obj', 'stl', 'ply', 'dae', '3mf', '3ds', 'wrl', 'vrml', 'step', 'stp'];
+
 let codecPromise;
 const extension = file => path.extname(file).slice(1).toLowerCase();
 const arrayBuffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -82,8 +84,21 @@ async function prepareSource(source, options, warnings) {
   let zip, entry = modelPath || normalizeName(fileName), format = inputFormat;
   if (format === 'zip') {
     zip = new ZipIndex(bytes, options);
-    const candidates = [...zip.entries.keys()].filter(name => MODEL_FORMATS.includes(extension(name)) && !name.split('/').some(part => part === '__MACOSX' || part.startsWith('._')));
-    candidates.sort((a, b) => a.split('/').length - b.split('/').length || MODEL_FORMATS.indexOf(extension(a)) - MODEL_FORMATS.indexOf(extension(b)) || a.localeCompare(b, 'en'));
+    const formats = options.entryFormats ?? MODEL_FORMATS;
+    const depth = name => name.split('/').length - 1;
+    const candidates = [...zip.entries.keys()].filter(name => {
+      const parts = name.split('/');
+      return formats.includes(extension(name)) &&
+        (options.entryDepth === undefined || depth(name) <= options.entryDepth) &&
+        !parts.some(part => part === '__MACOSX' || part.startsWith('._'));
+    });
+    candidates.sort((a, b) => {
+      const formatOrder = formats.indexOf(extension(a)) - formats.indexOf(extension(b));
+      const depthOrder = depth(a) - depth(b);
+      // Explicit format order takes precedence; retain legacy defaults otherwise.
+      return (options.entryFormats ? formatOrder || depthOrder : depthOrder || formatOrder) ||
+        a.localeCompare(b, 'en');
+    });
     if (options.entry !== undefined) {
       // Explicit selection is exact, not case-insensitive or a basename guess.
       if (typeof options.entry !== 'string' || !zip.entries.has(options.entry) || !MODEL_FORMATS.includes(extension(options.entry))) throw resourceError('ZIP_ENTRY_NOT_FOUND', `Exact supported ZIP entry not found: ${options.entry}`, { candidates });
@@ -372,6 +387,32 @@ async function parseThree(prepared, options, context, warnings) {
 export async function loadDocument(source, options = {}, context = {}) {
   const warnings = [];
   const prepared = await prepareSource(source, options, warnings);
+  if (prepared.format === 'fbx' && options.fbxBackend !== 'three') {
+    try {
+      const native = await convertNativeFbx(prepared, options, context, warnings);
+      const loaded = await readGLTF(native, options, warnings);
+      const renderable = loaded.document.getRoot().listMeshes().some(mesh =>
+        mesh.listPrimitives().some(primitive => {
+          const position = primitive.getAttribute('POSITION');
+          const count = primitive.getIndices()?.getCount() ?? position?.getCount() ?? 0;
+          const mode = primitive.getMode();
+          return position?.getCount() > 0 && count >= (mode === 0 ? 1 : mode <= 3 ? 2 : 3);
+        }));
+      if (!renderable) {
+        throw resourceError('FBX_OUTPUT_INVALID', 'Native FBX output has no renderable geometry.');
+      }
+
+      enforceFidelity(warnings, options); report(warnings, context);
+      return {
+        ...loaded, warnings, entry: prepared.entry, format: prepared.format,
+        inputFormat: prepared.inputFormat, entryFormat: prepared.format,
+        inputBytes: prepared.inputBytes, conversion: native.conversion,
+        nativeConversionMs: native.nativeConversionMs, nativeBytes: native.bytes,
+      };
+    } catch (error) {
+      throw Object.assign(error, { warnings, details: { ...error.details, warnings } });
+    }
+  }
   if (prepared.format === 'glb' || prepared.format === 'gltf') {
     try {
       const loaded = await readGLTF(prepared, options, warnings);
@@ -383,7 +424,7 @@ export async function loadDocument(source, options = {}, context = {}) {
   try {
     const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
     const exported = await new GLTFExporter().parseAsync(loaded.root, {
-      binary: true, onlyVisible: false, animations: loaded.animations,
+      binary: true, onlyVisible: options.onlyVisible ?? false, animations: loaded.animations,
       maxTextureSize: options.maxTextureSize ?? Infinity,
     });
     const bytes = new Uint8Array(exported);
@@ -393,7 +434,14 @@ export async function loadDocument(source, options = {}, context = {}) {
     const document = await io.readBinary(bytes);
     loaded.transformations.unshift(diagnostic('CONVERTED_TO_GLTF', `${prepared.format} parsed with its official loader and exported to glTF 2.0.`, false, { from: prepared.format, to: 'glb' }));
     enforceFidelity(warnings, options); report(warnings, context);
-    return { document, entry: prepared.entry, format: prepared.format, inputFormat: prepared.inputFormat, entryFormat: prepared.format, inputBytes: prepared.inputBytes, warnings, transformations: loaded.transformations };
+    const conversion = prepared.format === 'fbx'
+      ? { backend: 'three', version: `r${(await import('three')).REVISION}` } : undefined;
+    return {
+      document, entry: prepared.entry, format: prepared.format,
+      inputFormat: prepared.inputFormat, entryFormat: prepared.format,
+      inputBytes: prepared.inputBytes, warnings, transformations: loaded.transformations,
+      ...(conversion ? { conversion } : {}),
+    };
   } catch (error) { throw Object.assign(error, { warnings, details: { ...error.details, warnings } }); }
   finally { loaded.dispose(); loaded.restoreWarnings(); await loaded.adapter.dispose(); }
 }
