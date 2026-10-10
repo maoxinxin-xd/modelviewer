@@ -1,6 +1,6 @@
 {
   "name": "mivo-model-viewer",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Browser 3D viewer SDK and pure Node model processing CLI: inspect, render, convert and optimize.",
   "type": "module",
   "license": "MIT",
@@ -22,7 +22,8 @@
     "node",
     "README.md",
     "docs/cli-design.md",
-    "Dockerfile.node"
+    "Dockerfile.node",
+    "THIRD_PARTY_FBX2GLTF_LICENSE.txt"
   ],
   "sideEffects": false,
   "main": "./dist/mivo-model-viewer.js",
@@ -71,6 +72,7 @@
     "@napi-rs/canvas": "1.0.10",
     "commander": "15.0.0",
     "draco3dgltf": "1.5.7",
+    "fbx2gltf": "0.9.7-p1",
     "fflate": "^0.8.3",
     "linkedom": "0.18.13",
     "meshoptimizer": "1.2.0",
@@ -89,7 +91,7 @@
     "mivo-model-viewer": "./node/cli.mjs"
   },
   "optionalDependencies": {
-    "webgpu": "0.6.2",
-    "occt-import-js": "0.0.23"
+    "occt-import-js": "0.0.23",
+    "webgpu": "0.6.2"
   }
 }

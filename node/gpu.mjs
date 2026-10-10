@@ -1,5 +1,9 @@
+import { prepareDevice, checkDevice } from './gpu-device.mjs';
+
 /** Dawn/WebGPU adapter. Imported only inside the isolated render task. */
-export async function createRenderer(width, height) {
+export async function createRenderer(width, height, options = {}) {
+  const requestedDevice = options.device ?? 'auto';
+  const selection = await prepareDevice(requestedDevice);
   let binding;
   try { binding = await import('webgpu'); }
   catch (cause) { throw Object.assign(new Error('Node WebGPU is unavailable. Install optional npm dependencies for this platform.', { cause }), { code: 'RENDER_DEPENDENCY_MISSING' }); }
@@ -9,15 +13,18 @@ export async function createRenderer(width, height) {
   let renderer;
   let screenTexture;
   try {
-    const backend = process.env.MIVO_GPU_BACKEND || (process.platform === 'linux' ? 'vulkan' : process.platform === 'darwin' ? 'metal' : 'd3d12');
+    const { backend } = selection;
     const args = [`backend=${backend}`];
-    if (process.env.MIVO_GPU_ADAPTER) args.push(`adapter=${process.env.MIVO_GPU_ADAPTER}`);
+    if (selection.adapter) args.push(`adapter=${selection.adapter}`);
     gpu = binding.create(args);
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { gpu, userAgent: 'Mivo Node renderer' } });
     globalThis.self = { requestAnimationFrame: () => 0, cancelAnimationFrame() {} };
     const THREE = await import('three/webgpu');
     const adapter = await gpu.requestAdapter();
-    if (!adapter) throw new Error('No WebGPU adapter. On Linux install libvulkan1 and mesa-vulkan-drivers, and select the Lavapipe Vulkan ICD.');
+    if (!adapter) {
+      throw new Error('No WebGPU adapter. On Linux install libvulkan1 and mesa-vulkan-drivers.');
+    }
+    const deviceType = checkDevice(requestedDevice, adapter);
     const limits = adapter.limits;
     if (width > limits.maxTextureDimension2D || height > limits.maxTextureDimension2D) throw new Error(`Image size exceeds the device limit ${limits.maxTextureDimension2D}.`);
     device = await adapter.requestDevice();
@@ -45,7 +52,7 @@ export async function createRenderer(width, height) {
     renderer.setRenderTarget(target);
     return {
       THREE, renderer, target, device,
-      backend,
+      backend, deviceType, requestedDevice,
       adapter: { vendor: adapter.info?.vendor || '', description: adapter.info?.description || '' },
       async render(scene, camera) {
         device.pushErrorScope('validation');

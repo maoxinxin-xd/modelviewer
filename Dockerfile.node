@@ -5,10 +5,9 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production MIVO_GPU_BACKEND=vulkan
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts
-# Three remains a peer of the browser SDK, but the CLI requires its loaders and WebGPU renderer.
-RUN npm install --no-save --ignore-scripts three@0.170.0
+COPY package.json ./
+# Published npm tarballs omit the lockfile; keep the CLI's Three dependency local and pinned.
+RUN npm install --omit=dev --ignore-scripts --no-save --package-lock=false three@0.170.0
 COPY node ./node
 # Choose the actual Lavapipe ICD filename (Mesa versions differ on arch suffix).
 RUN printf '#!/bin/sh\nset -eu\nicd=$(find /usr/share/vulkan/icd.d -name "lvp_icd*.json" | head -n 1)\nif [ -z "$icd" ]; then echo "Lavapipe Vulkan ICD not installed" >&2; exit 1; fi\nexport VK_DRIVER_FILES="$icd" VK_ICD_FILENAMES="$icd"\nexec node /app/node/cli.mjs "$@"\n' > /usr/local/bin/mivo-node \

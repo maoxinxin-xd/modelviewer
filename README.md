@@ -499,7 +499,7 @@ GitHub Pages：推送到 `main` 后由 Actions 构建 Demo 并部署（站点路
 
 ## 发布
 
-包已发布：`mivo-model-viewer@0.4.0`（账号 `miragari`）。
+npm 包：`mivo-model-viewer`（维护账号 `miragari`）；版本以 `package.json` 为准。
 
 ```bash
 npm run build
@@ -552,9 +552,34 @@ try {
   })
   await writeFile('/data/model-small.glb', result.outputs[0].bytes)
 } finally {
-  processor.close()
+  await processor.close()
 }
 ```
+
+### 0.6.0：原生 FBX 转换
+
+Node 的 FBX 默认使用依赖内的 FBX2glTF，不需要全局安装转换器。
+文件、字节和 ZIP 内 FBX 的 `convert`、`info`、`render` 使用同一原生加载流程。
+
+```bash
+mivo-model-viewer doctor --json
+mivo-model-viewer convert ./model.fbx -o ./model.glb --json
+# 显式使用旧 Three.js 后端，或指定自有可执行文件
+mivo-model-viewer convert ./model.fbx -o ./model.glb --fbx-backend three
+mivo-model-viewer doctor --fbx-binary /absolute/path/FBX2glTF --json
+```
+
+Node API 对应 `fbxBackend: 'native' | 'three'`、`fbxBinary`。
+原生失败不会自动回退；`onlyVisible: true` 需显式使用 `three`。
+明确验收环境为 macOS ARM64 + Rosetta（运行 x64 二进制）和 Ubuntu x64/glibc。
+SDK 不自动安装 Rosetta，不承诺 Windows、Linux ARM64 或 Alpine/musl。
+
+原生结果提供实际后端、版本和 `data.timings.nativeConversionMs`，
+该耗时只计原生子进程，不等于 SDK 总耗时。
+缺失纹理会报告警告，`--strict` 拒绝；图片数量一致不代表找回真实纹理。
+父进程负责清理任务进程组和临时目录，关闭 processor 时须 `await processor.close()`。
+依赖的第三方许可和 Autodesk 声明见 `THIRD_PARTY_FBX2GLTF_LICENSE.txt`。
+浏览器端 FBX 加载不受此 Node 默认后端变更影响。
 
 普通转换保真优先；`--optimize` 沿用 glTF Transform 4.5.1 完整优化默认值，可能改变节点层级与模型细节。默认减面目标比例 0、误差 0.0001，表示在误差约束内尽量简化，不保证固定保留比例。
 

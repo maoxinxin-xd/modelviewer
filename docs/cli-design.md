@@ -55,6 +55,7 @@ JSON 外壳为 `{schemaVersion:1,ok,command,input,entry,outputs,data,warnings,er
 ### convert / optimize
 
 输出仅 GLB。普通 convert 保留坐标、比例、层级、已解析动画与隐藏节点，不主动合并、缩图或减面；`--center`、`--only-visible`、`--no-animations` 显式改变行为。
+原生 FBX 不支持 `--only-visible`，此选项需显式指定 `--fbx-backend three`。
 
 优化顺序：dedup → instance → palette → flatten → join → weld → simplify → resample → prune → sparse → textureCompress → meshopt/draco/quantize。
 
@@ -78,7 +79,7 @@ try {
   });
   // result.outputs[0].bytes 是最终 GLB，不要求先写输出文件。
 } finally {
-  processor.close();
+  await processor.close();
 }
 ```
 
