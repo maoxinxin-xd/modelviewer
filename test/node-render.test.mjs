@@ -61,7 +61,7 @@ async function pixels(output) {
   return sharp(output.bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
 }
 
-test('native render: axis views, side alias and shared orthographic framing', {
+test('native render: server-compatible axes, side alias and shared orthographic framing', {
   skip: !process.env.MIVO_TEST_RENDER,
 }, async () => {
   const source = await coloredBox();
@@ -74,13 +74,13 @@ test('native render: axis views, side alias and shared orthographic framing', {
   for (const output of result.outputs) images.set(output.view, await pixels(output));
   const center = (64 * 129 + 64) * 4;
   const rgba = view => [...images.get(view).data.subarray(center, center + 4)];
-  assert.ok(rgba('left')[2] > 200 && rgba('left')[0] < 20);
-  assert.ok(rgba('right')[0] > 200 && rgba('right')[2] < 20);
+  assert.ok(rgba('left')[0] > 200 && rgba('left')[2] < 20);
+  assert.ok(rgba('right')[2] > 200 && rgba('right')[0] < 20);
   assert.ok(rgba('top')[1] > 200 && rgba('top')[0] < 20);
   assert.ok(rgba('front')[0] > 200 && rgba('front')[1] > 200);
   assert.ok(rgba('back')[1] > 200 && rgba('back')[2] > 200);
   assert.ok(rgba('bottom')[0] > 200 && rgba('bottom')[2] > 200);
-  assert.deepEqual(images.get('right').data, images.get('side').data);
+  assert.deepEqual(images.get('left').data, images.get('side').data);
   for (const { data } of images.values()) assert.equal(data[3], 0);
   const verticalSpan = view => {
     let min = 129, max = -1;

@@ -101,9 +101,11 @@ export async function renderDocument(document, options = {}, context = {}) {
         const horizontalDistance = radius / Math.sin(Math.atan(Math.tan(Math.PI / 8) * aspect));
         distance = Math.max(verticalDistance, horizontalDistance) * (1 + padding);
       }
+      // Match the server Blender views after glTF Y-up to Blender Z-up conversion.
+      // Its legacy side view is +X, the same direction as left.
       const directions = {
         front: [0, 0, 1], back: [0, 0, -1],
-        left: [-1, 0, 0], right: [1, 0, 0], side: [1, 0, 0],
+        left: [1, 0, 0], right: [-1, 0, 0], side: [1, 0, 0],
         top: [0, 1, 0], bottom: [0, -1, 0], none: [1, 0.65, 1],
       };
       camera.far = Math.max(far, distance + radius * 2);
