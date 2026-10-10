@@ -1,6 +1,6 @@
 /** Pure Node entry point. No browser or GPU initialization occurs in the host process. */
 export type ModelSource = string | { bytes: Uint8Array; fileName: string; resources?: Record<string, Uint8Array> };
-/** side is a compatibility alias for right. */
+/** Server-compatible glTF Y-up views: left is +X, right is -X; side aliases left. */
 export type PresetView =
   | 'front' | 'back' | 'left' | 'right' | 'side' | 'top' | 'bottom' | 'none';
 export interface Warning { code: string; message: string; affectsFidelity: boolean; resource?: string; details?: unknown }

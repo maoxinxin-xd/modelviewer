@@ -209,7 +209,8 @@ export async function runCli(argv = process.argv, { stdout = process.stdout, std
   const render = taskOptions(program.command('render').argument('<input>', 'Input model path'));
   render.option('-o, --output <path>', 'Single image destination').option('--output-dir <path>', 'Multi-view image directory')
     .option('--views <views>', 'Comma-separated unique views; requires --output-dir')
-    .option('--view <view>', 'front, back, left, right, top, bottom, none; side aliases right')
+    .option('--view <view>',
+      'front, back, left, right, top, bottom, none; side aliases left')
     .option('--device <device>', 'auto, software, or hardware (default: auto)')
     .option('--padding <ratio>', 'Camera framing padding (default: 0.1)', Number)
     .option('--format <format>', 'png, jpg/jpeg, or webp').option('--size <pixels>', 'Square image size (default: 1024)')
